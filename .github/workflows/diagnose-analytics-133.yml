@@ -1,0 +1,35 @@
+name: Diagnose analytics 133
+
+on:
+  push:
+    branches:
+      - diagnostic/analytics-133
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.28.2 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Add browser diagnostics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('e2e/analytics.spec.ts')
+          s = p.read_text()
+          needle = "test('blog_post_read fires once at/after 80% scroll', async ({ page }) => {\n"
+          repl = needle + "    page.on('console', (msg) => console.log('BROWSER CONSOLE:', msg.type(), msg.text()));\n    page.on('pageerror', (err) => console.log('PAGE ERROR:', err.message, err.stack));\n"
+          if needle not in s:
+              raise SystemExit('needle not found')
+          p.write_text(s.replace(needle, repl, 1))
+          PY
+      - name: Run focused analytics test
+        run: pnpm exec playwright test e2e/analytics.spec.ts --project=e2e-chromium -g "blog_post_read" --reporter=line
