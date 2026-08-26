@@ -38,7 +38,18 @@ const rawModules = import.meta.glob('/src/content/blog/*.mdx', {
   query: '?raw',
   import: 'default',
   eager: true,
-}) as Record<string, string>;
+}) as Record<string, unknown>;
+
+function getRawContent(value: unknown): string {
+  if (typeof value === 'string') return value;
+
+  if (value && typeof value === 'object' && 'default' in value) {
+    const defaultExport = (value as { default?: unknown }).default;
+    if (typeof defaultExport === 'string') return defaultExport;
+  }
+
+  return '';
+}
 
 // Cache posts to avoid re-parsing on every call
 let cachedPosts: BlogPost[] | null = null;
@@ -52,7 +63,7 @@ export function getAllPosts(): BlogPost[] {
       const slug = filename.replace(/\.mdx$/, '');
       const frontmatter = mod.frontmatter || {};
 
-      const rawContent = rawModules[filepath] || '';
+      const rawContent = getRawContent(rawModules[filepath]);
       const body = rawContent.replace(/^---[\s\S]*?^---/m, '');
       const words = body.split(/\s+/).filter(Boolean).length;
       const readingTimeMin = Math.max(1, Math.ceil(words / 200));
