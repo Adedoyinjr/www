@@ -1,14 +1,16 @@
 import { Link } from 'react-router-dom';
 
+const ANALYTICS_ENDPOINT = 'https://plausible.io/api/event';
+
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <div className="flex flex-col gap-3">
+  <section className="flex flex-col gap-3">
     <h2 className="font-heading text-[18px] font-semibold tracking-[-0.4px] text-on-surface">
       {title}
     </h2>
     <div className="flex flex-col gap-2 font-body text-[14px] leading-[1.7] text-on-surface-variant">
       {children}
     </div>
-  </div>
+  </section>
 );
 
 export default function Security() {
@@ -27,91 +29,64 @@ export default function Security() {
         <div className="flex flex-col gap-12">
           <div className="flex flex-col gap-4 border-b border-outline-variant pb-10">
             <span className="font-mono text-[10px] font-semibold uppercase tracking-[2px] text-outline">
-              Legal
+              Security
             </span>
             <h1 className="font-heading text-[36px] font-bold tracking-[-1.5px] text-on-surface sm:text-[48px]">
               Security & Analytics
             </h1>
-            <p className="font-body text-[14px] text-outline">
-              Last updated: June 2025 &nbsp;·&nbsp; usewraith.xyz
-            </p>
+            <p className="font-body text-[14px] text-outline">usewraith.xyz</p>
           </div>
 
-          <Section title="First-party analytics endpoint">
+          <Section title="Analytics endpoint">
             <p>
-              This site uses a single, first-party analytics endpoint:{' '}
-              <strong className="text-on-surface">Plausible Analytics</strong>, an
-              open-source, EU-hosted, cookieless product. All custom events are forwarded to
-              Plausible&apos;s event endpoint through the existing{' '}
-              <code className="font-mono text-xs text-primary bg-surface-container px-1.5 py-0.5 border border-outline-variant">
-                window.plausible()
-              </code>{' '}
-              integration. No other analytics provider, tag manager, or tracking pixel is loaded.
-            </p>
-          </Section>
-
-          <Section title="No additional analytics providers">
-            <p>
-              Beyond Plausible, no third-party analytics, advertising, or fingerprinting scripts
-              run on this site. The only other external resource fetched is the Google Fonts
-              stylesheet, which is documented in our{' '}
-              <Link to="/privacy" className="text-primary underline hover:text-on-surface">
-                Privacy Policy
-              </Link>
-              .
+              The site uses Plausible for aggregate analytics. Custom analytics events are delivered
+              to exactly{' '}
+              <code className="break-all font-mono text-xs text-primary">{ANALYTICS_ENDPOINT}</code>{' '}
+              through the existing <code className="font-mono text-xs">window.plausible()</code>{' '}
+              integration. No additional analytics provider, tag manager, or tracking pixel is added
+              by issue #133.
             </p>
           </Section>
 
           <Section title="DNT / GPC enforcement">
             <p>
-              Every named analytics event is routed through a single typed helper (
-              <code className="font-mono text-xs text-primary bg-surface-container px-1.5 py-0.5 border border-outline-variant">
-                track()
-              </code>
-              ) that checks the visitor&apos;s Do-Not-Track (DNT) and Global Privacy Control (GPC)
-              browser signals before sending anything. When DNT or GPC is enabled,{' '}
-              <strong className="text-on-surface">no analytics request is made at all</strong> —
-              not even a pageview.
+              Do-Not-Track and Global Privacy Control are enforced before Plausible is loaded. When
+              either signal opts the visitor out, the analytics script is not requested and no
+              request is made to <code className="font-mono text-xs">{ANALYTICS_ENDPOINT}</code>.
+              Named events use the shared privacy gate in{' '}
+              <code className="font-mono text-xs">src/utils/privacy.ts</code>, and Web Vitals reuse
+              the same check.
             </p>
           </Section>
 
-          <Section title="Minimal payload collection">
-            <p>Each analytics event carries only the minimum fields needed to understand usage:</p>
+          <Section title="Typed event boundary">
+            <p>
+              Custom event names and payloads are defined in{' '}
+              <code className="font-mono text-xs">src/utils/track.ts</code>. Payloads are flattened
+              to string, number, and boolean properties before they reach Plausible, and fields with
+              an undefined value are dropped.
+            </p>
+          </Section>
+
+          <Section title="Sensitive data exclusions">
             <ul className="ml-4 list-disc space-y-1">
-              <li>An event name (e.g. <code className="font-mono text-xs">cta_click</code>).</li>
-              <li>
-                A small set of flat string/number/boolean props such as{' '}
-                <code className="font-mono text-xs">source</code>,{' '}
-                <code className="font-mono text-xs">slug</code>,{' '}
-                <code className="font-mono text-xs">locale</code>, or{' '}
-                <code className="font-mono text-xs">category</code>.
-              </li>
-              <li>Web Vitals metrics (LCP / INP / CLS) as numeric values with a rating.</li>
+              <li>Wallet and stealth addresses are never included.</li>
+              <li>Transaction hashes and transaction amounts are never included.</li>
+              <li>Newsletter email addresses and form contents are never included.</li>
+              <li>Outbound events record a destination category, not the full target URL.</li>
+              <li>No new cookie, fingerprint, or persistent cross-site identifier is introduced.</li>
             </ul>
           </Section>
 
-          <Section title="No newsletter form contents in analytics">
+          <Section title="Event inventory and retention">
             <p>
-              The newsletter signup form transmits only the email address, and only to our
-              privacy-respecting email provider (Buttondown) via a server-side proxy. The email
-              address, or any part of it, is{' '}
-              <strong className="text-on-surface">never</strong> included in any analytics event.
-            </p>
-          </Section>
-
-          <Section title="No secrets or tokens">
-            <p>
-              API keys and server-side secrets (for example the Buttondown API key) live only in
-              Vercel environment variables and are never exposed to the client or sent through
-              analytics.
-            </p>
-          </Section>
-
-          <Section title="No sensitive content in events">
-            <p>
-              Analytics events never contain wallet addresses, transaction hashes, stealth
-              addresses, IP addresses, or any personally identifiable information. Only aggregate,
-              non-identifying interaction metadata is recorded.
+              The complete event-name, trigger, payload, status, retention, and endpoint inventory is
+              maintained on the{' '}
+              <Link to="/privacy" className="text-primary underline hover:text-on-surface">
+                Privacy Policy
+              </Link>
+              . Reserved event types are documented there as not emitted when the corresponding UI
+              does not exist.
             </p>
           </Section>
 
