@@ -1,7 +1,10 @@
+import { useEffect } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link, useParams } from 'react-router-dom';
 import { getAllPosts, getPostBySlug } from '../utils/blog';
 import BlogToc from '../components/BlogToc';
+import { track } from '../utils/track';
+import i18n from '../i18n';
 
 function BlogList() {
   const posts = getAllPosts();
@@ -78,6 +81,11 @@ function BlogList() {
 
 function BlogPostDetail({ slug }: { slug: string }) {
   const post = getPostBySlug(slug);
+
+  useEffect(() => {
+    if (!post) return;
+    track('blog_post_read', { slug: post.slug, locale: i18n.language });
+  }, [post, slug]);
 
   if (!post) {
     return (
