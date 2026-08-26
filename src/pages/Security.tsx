@@ -74,14 +74,16 @@ export default function Security() {
               <li>Transaction hashes and transaction amounts are never included.</li>
               <li>Newsletter email addresses and form contents are never included.</li>
               <li>Outbound events record a destination category, not the full target URL.</li>
-              <li>No new cookie, fingerprint, or persistent cross-site identifier is introduced.</li>
+              <li>
+                No new cookie, fingerprint, or persistent cross-site identifier is introduced.
+              </li>
             </ul>
           </Section>
 
           <Section title="Event inventory and retention">
             <p>
-              The complete event-name, trigger, payload, status, retention, and endpoint inventory is
-              maintained on the{' '}
+              The complete event-name, trigger, payload, status, retention, and endpoint inventory
+              is maintained on the{' '}
               <Link to="/privacy" className="text-primary underline hover:text-on-surface">
                 Privacy Policy
               </Link>
