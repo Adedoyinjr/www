@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import '../i18n';
 import StealthAnimation from '../components/StealthAnimation';
 
 describe('StealthAnimation', () => {

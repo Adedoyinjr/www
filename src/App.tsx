@@ -36,6 +36,7 @@ const Vitals = lazy(() => import('./pages/Vitals'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Contributors = lazy(() => import('./pages/Contributors'));
 const Blog = lazy(() => import('./pages/Blog'));
+const Ecosystem = lazy(() => import('./pages/Ecosystem'));
 const Security = lazy(() => import('./pages/Security'));
 
 function Home() {
@@ -139,6 +140,14 @@ export default function App() {
               element={
                 <Layout>
                   <Blog />
+                </Layout>
+              }
+            />
+            <Route
+              path="/ecosystem"
+              element={
+                <Layout>
+                  <Ecosystem />
                 </Layout>
               }
             />

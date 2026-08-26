@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { trackOutbound } from '../utils/track';
+import { track, trackOutbound } from '../utils/track';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,9 +43,11 @@ function NewsletterWidget() {
   const [email, setEmail] = useState('');
   const [state, setState] = useState<WidgetState>('idle');
   const inputRef = useRef<HTMLInputElement>(null);
+  const submittedRef = useRef(false);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (submittedRef.current) return;
     const trimmed = email.trim().toLowerCase();
 
     if (!trimmed || !EMAIL_RE.test(trimmed)) {
@@ -63,8 +65,13 @@ function NewsletterWidget() {
         body: JSON.stringify({ email: trimmed }),
       });
 
-      // 201 = queued; 409 = already subscribed (treat as success to avoid user-enumeration)
+      // 201 = queued; 409 = already subscribed (treat as success to avoid user-enumeration).
+      // Only a newly accepted subscription is a conversion.
       if (res.status === 201 || res.status === 409) {
+        if (res.status === 201) {
+          submittedRef.current = true;
+          track('newsletter_submit', { source: 'footer' });
+        }
         setState('success');
         return;
       }

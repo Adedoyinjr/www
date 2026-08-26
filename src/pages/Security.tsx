@@ -82,13 +82,75 @@ export default function Security() {
 
           <Section title="Event inventory and retention">
             <p>
-              The complete event-name, trigger, payload, status, retention, and endpoint inventory
-              is maintained on the{' '}
+              Aggregate event data is retained by Plausible under the project&apos;s analytics
+              retention configuration. Every event below is sent only to{' '}
+              <code className="break-all font-mono text-xs">{ANALYTICS_ENDPOINT}</code>, is blocked
+              by DNT/GPC, and does not introduce another analytics service.
+            </p>
+            <dl className="flex flex-col gap-3 border-l border-outline-variant pl-4">
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">cta_click</dt>
+                <dd>
+                  Payload: <code className="font-mono text-xs">source: string</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">
+                  newsletter_submit
+                </dt>
+                <dd>
+                  Payload: <code className="font-mono text-xs">source: string</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">
+                  newsletter_confirm
+                </dt>
+                <dd>
+                  Payload: <code className="font-mono text-xs">source: string</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">blog_post_read</dt>
+                <dd>
+                  Payload: <code className="font-mono text-xs">slug: string; locale?: string</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">
+                  calculator_share
+                </dt>
+                <dd>
+                  Payload: <code className="font-mono text-xs">source?: string</code>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">
+                  chain_matrix_sort
+                </dt>
+                <dd>
+                  Payload:{' '}
+                  <code className="font-mono text-xs">
+                    column: string; direction: &apos;asc&apos; | &apos;desc&apos;
+                  </code>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-mono text-xs font-semibold text-on-surface">outbound_click</dt>
+                <dd>
+                  Payload:{' '}
+                  <code className="font-mono text-xs">
+                    category: github | docs | social | explorer | ecosystem | partner | other
+                  </code>
+                </dd>
+              </div>
+            </dl>
+            <p>
+              Trigger and availability notes are mirrored on the{' '}
               <Link to="/privacy" className="text-primary underline hover:text-on-surface">
                 Privacy Policy
               </Link>
-              . Reserved event types are documented there as not emitted when the corresponding UI
-              does not exist.
+              .
             </p>
           </Section>
 
