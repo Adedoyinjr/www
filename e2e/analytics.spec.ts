@@ -94,7 +94,7 @@ test.describe('first-party analytics', () => {
       .poll(() => events.filter((event) => event.name === 'newsletter_submit').length)
       .toBe(1);
 
-    await submit.click().catch(() => {});
+    await expect(submit).toBeHidden();
     await page.waitForTimeout(100);
 
     expect(events.filter((event) => event.name === 'newsletter_submit')).toHaveLength(1);
