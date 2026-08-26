@@ -36,6 +36,7 @@ const Vitals = lazy(() => import('./pages/Vitals'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Contributors = lazy(() => import('./pages/Contributors'));
 const Blog = lazy(() => import('./pages/Blog'));
+const Security = lazy(() => import('./pages/Security'));
 
 function Home() {
   return (
@@ -138,6 +139,14 @@ export default function App() {
               element={
                 <Layout>
                   <Blog />
+                </Layout>
+              }
+            />
+            <Route
+              path="/security"
+              element={
+                <Layout>
+                  <Security />
                 </Layout>
               }
             />

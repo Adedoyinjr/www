@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { trackOutbound } from '../utils/track';
 import waveData from '../data/wave.json';
 
 type Wave = (typeof waveData)['currentWave'];
@@ -28,6 +29,7 @@ export default function Grants() {
             <a
               href="https://www.drips.network"
               target="_blank"
+              onClick={trackOutbound('other')}
               rel="noopener noreferrer"
               className="text-primary underline underline-offset-2 transition-colors hover:brightness-110"
             >
@@ -82,6 +84,7 @@ export default function Grants() {
               <a
                 href={currentWave.applyUrl}
                 target="_blank"
+                onClick={trackOutbound('other')}
                 rel="noopener noreferrer"
                 className="inline-flex h-11 w-fit items-center justify-center bg-primary px-6 font-heading text-[13px] font-semibold uppercase tracking-[1.5px] text-surface transition-[filter] duration-150 hover:brightness-110"
               >
