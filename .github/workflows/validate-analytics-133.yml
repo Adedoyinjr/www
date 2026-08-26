@@ -1,0 +1,54 @@
+name: Validate analytics vitals 133
+
+on:
+  push:
+    branches:
+      - validation2/analytics-vitals-133
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.28.2 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Formatting
+        run: pnpm format:check
+      - name: Unit tests
+        run: pnpm test
+      - name: Production build
+        run: pnpm build
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Analytics acceptance E2E
+        run: pnpm exec playwright test e2e/analytics.spec.ts --project=e2e-chromium --reporter=line
+      - name: Start preview
+        run: |
+          pnpm preview -- --port 4173 > /tmp/wraith-preview.log 2>&1 &
+          echo $! > /tmp/wraith-preview.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/vitals >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/wraith-preview.log
+          exit 1
+      - name: Lighthouse /vitals
+        run: |
+          pnpm dlx lighthouse@12.8.2 http://127.0.0.1:4173/vitals \
+            --chrome-flags="--headless --no-sandbox --disable-gpu" \
+            --only-categories=performance,seo \
+            --output=json --output-path=/tmp/lighthouse.json --quiet
+          node - <<'NODE'
+          const report = require('/tmp/lighthouse.json');
+          const perf = Math.round(report.categories.performance.score * 100);
+          const seo = Math.round(report.categories.seo.score * 100);
+          console.log(`Lighthouse Performance: ${perf}`);
+          console.log(`Lighthouse SEO: ${seo}`);
+          if (perf < 90 || seo < 90) process.exit(1);
+          NODE
