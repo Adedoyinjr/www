@@ -1,3 +1,4 @@
+import { Helmet } from 'react-helmet-async';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -67,6 +68,21 @@ function CaseStudyDetail({ study }: { study: CaseStudy }) {
 
   return (
     <Layout>
+      <Helmet>
+        <title>{study.org} — Wraith Protocol</title>
+        <meta name="description" content={study.summary} />
+        <meta property="og:title" content={`${study.org} — Wraith Protocol`} />
+        <meta property="og:description" content={study.summary} />
+        <meta
+          property="og:image"
+          content={`https://usewraith.xyz/og/case-study-${study.slug}.png`}
+        />
+        <meta property="og:url" content={`https://usewraith.xyz/case-studies/${study.slug}`} />
+        <meta property="og:type" content="article" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${study.org} — Wraith Protocol`} />
+        <meta name="twitter:description" content={study.summary} />
+      </Helmet>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
@@ -261,6 +277,22 @@ function CaseStudiesList() {
 
   return (
     <Layout>
+      <Helmet>
+        <title>Case Studies — Wraith Protocol</title>
+        <meta
+          name="description"
+          content="Real-world privacy solutions built on Wraith Protocol. From payroll processors to DAOs."
+        />
+        <meta property="og:title" content="Case Studies — Wraith Protocol" />
+        <meta
+          property="og:description"
+          content="Real-world privacy solutions built on Wraith Protocol. From payroll processors to DAOs."
+        />
+        <meta property="og:image" content="https://usewraith.xyz/og/case-studies.png" />
+        <meta property="og:url" content="https://usewraith.xyz/case-studies" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+      </Helmet>
       <div className="mx-auto max-w-[1344px] px-6 py-16 md:px-12">
         {/* Header */}
         <div className="mb-12 flex flex-col gap-6 border-b border-outline-variant pb-10">

@@ -1,3 +1,4 @@
+import { Helmet } from 'react-helmet-async';
 import { useState } from 'react';
 import waveData from '../data/wave.json';
 
@@ -14,8 +15,40 @@ const labelStyles = 'font-mono text-[10px] font-semibold uppercase tracking-[1.8
 export default function Grants() {
   const [openFaqId, setOpenFaqId] = useState<string | null>(null);
 
+  const currentWaveName = currentWave?.name ?? '';
+  const currentWaveDesc = currentWave?.description ?? '';
+
   return (
-    <div className="mx-auto flex max-w-[1120px] flex-col px-6 py-10 md:px-12 md:py-16">
+    <>
+      <Helmet>
+        <title>{`Grants${currentWaveName ? ' — ' + currentWaveName : ''} — ${'Wraith Protocol'}`}</title>
+        <meta
+          name="description"
+          content={currentWaveDesc || 'Wraith Protocol runs a grant program for privacy infrastructure.'}
+        />
+        <meta
+          property="og:title"
+          content={`Grants${currentWaveName ? ' — ' + currentWaveName : ''} — Wraith Protocol`}
+        />
+        <meta
+          property="og:description"
+          content={currentWaveDesc || 'Wraith Protocol runs a grant program for privacy infrastructure.'}
+        />
+        <meta property="og:image" content="https://usewraith.xyz/og/grants.png" />
+        <meta property="og:url" content="https://usewraith.xyz/grants" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta
+          name="twitter:title"
+          content={`Grants${currentWaveName ? ' — ' + currentWaveName : ''} — Wraith Protocol`}
+        />
+        <meta
+          name="twitter:description"
+          content={currentWaveDesc || 'Wraith Protocol runs a grant program for privacy infrastructure.'}
+        />
+      </Helmet>
+
+      <div className="mx-auto flex max-w-[1120px] flex-col px-6 py-10 md:px-12 md:py-16">
       {/* Hero */}
       <section className="flex flex-col gap-6 border-b border-outline-variant pb-12">
         <span className={labelStyles}>Grants</span>
@@ -237,5 +270,6 @@ export default function Grants() {
         </section>
       )}
     </div>
+    </>
   );
 }

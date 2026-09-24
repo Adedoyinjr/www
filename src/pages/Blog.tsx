@@ -14,6 +14,15 @@ function BlogList() {
           name="description"
           content="Updates from Wraith Protocol on privacy-preserving payments and stealth infrastructure."
         />
+        <meta property="og:title" content="Blog – Wraith Protocol" />
+        <meta
+          property="og:description"
+          content="Updates from Wraith Protocol on privacy-preserving payments and stealth infrastructure."
+        />
+        <meta property="og:image" content="https://usewraith.xyz/og/blog.png" />
+        <meta property="og:url" content="https://usewraith.xyz/blog" />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
         <link
           rel="alternate"
           type="application/rss+xml"
@@ -101,6 +110,15 @@ function BlogPostDetail({ slug }: { slug: string }) {
       <Helmet>
         <title>{post.title} – Wraith Protocol</title>
         {post.excerpt && <meta name="description" content={post.excerpt} />}
+        {post.excerpt && <meta property="og:description" content={post.excerpt} />}
+        <meta property="og:title" content={`${post.title} – Wraith Protocol`} />
+        <meta
+          property="og:image"
+          content={`https://usewraith.xyz/og/blog-${post.slug}.png`}
+        />
+        <meta property="og:url" content={`https://usewraith.xyz/blog/${post.slug}`} />
+        <meta property="og:type" content="article" />
+        <meta name="twitter:card" content="summary_large_image" />
       </Helmet>
 
       <div className="mb-8 flex flex-col gap-3">

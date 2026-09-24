@@ -44,11 +44,16 @@ const routes: RouteConfig[] = [
     chainBadge: 'Stellar',
   },
   {
-    slug: 'compare',
-    routePath: '/compare',
-    title: 'Privacy Comparison',
-    subtitle: 'How Wraith stacks up against the alternatives',
-    chainBadge: 'EVM · Stellar',
+    slug: 'roadmap',
+    routePath: '/roadmap',
+    title: 'Roadmap',
+    subtitle: 'The future of Wraith',
+  },
+  {
+    slug: 'use-cases',
+    routePath: '/use-cases',
+    title: 'Use Cases',
+    subtitle: 'Who uses Wraith Protocol and why',
   },
   {
     slug: 'faq',
@@ -63,12 +68,6 @@ const routes: RouteConfig[] = [
     subtitle: "How we handle your data — spoiler: we don't collect any",
   },
   {
-    slug: 'use-cases',
-    routePath: '/use-cases',
-    title: 'Use Cases',
-    subtitle: 'Who uses Wraith Protocol and why',
-  },
-  {
     slug: 'blog',
     routePath: '/blog',
     title: 'Blog',
@@ -80,7 +79,87 @@ const routes: RouteConfig[] = [
     title: 'Newsletter',
     subtitle: 'Mainnet updates, security advisories, and grant news — no tracking',
   },
+  {
+    slug: 'case-studies',
+    routePath: '/case-studies',
+    title: 'Case Studies',
+    subtitle: 'Real-world privacy solutions built on Wraith Protocol',
+  },
+  {
+    slug: 'grants',
+    routePath: '/grants',
+    title: 'Grants',
+    subtitle: 'Build private payments. Get funded.',
+    chainBadge: 'Stellar · EVM',
+  },
+  {
+    slug: 'about',
+    routePath: '/about',
+    title: 'About',
+    subtitle: 'Building privacy-preserving payment infrastructure for everyone.',
+  },
+  {
+    slug: 'careers',
+    routePath: '/careers',
+    title: 'Careers',
+    subtitle: 'Open-source bounties and paid contract work.',
+  },
+  {
+    slug: 'contributors',
+    routePath: '/contributors',
+    title: 'Contributors',
+    subtitle: 'The people building and improving Wraith Protocol.',
+  },
+  {
+    slug: 'vitals',
+    routePath: '/vitals',
+    title: 'Web Vitals',
+    subtitle: 'Real-user performance telemetry for usewraith.xyz.',
+  },
 ];
+
+function getBlogRoutes(): RouteConfig[] {
+  const manifestPath = join(rootDir, 'src', 'data', 'blog-manifest.json');
+  if (!existsSync(manifestPath)) return [];
+
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Array<{
+      slug: string;
+      title: string;
+      excerpt: string;
+      author?: string;
+    }>;
+
+    return manifest.map((post) => ({
+      slug: `blog-${post.slug}`,
+      routePath: `/blog/${post.slug}`,
+      title: post.title,
+      subtitle: post.excerpt || 'Updates from Wraith Protocol',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function getCaseStudyRoutes(): RouteConfig[] {
+  const csPath = join(rootDir, 'src', 'data', 'case-studies.json');
+  if (!existsSync(csPath)) return [];
+
+  try {
+    const data = JSON.parse(readFileSync(csPath, 'utf8')) as {
+      entries: Array<{ slug: string; org: string; summary: string; industry: string }>;
+    };
+
+    return data.entries.map((study) => ({
+      slug: `case-study-${study.slug}`,
+      routePath: `/case-studies/${study.slug}`,
+      title: study.org,
+      subtitle: study.summary || study.industry || 'Built with Wraith stealth addresses.',
+    }));
+  } catch {
+    return [];
+  }
+}
 
 function ogCard({ title, subtitle, chainBadge }: RouteConfig) {
   const titleSize = title.length > 25 ? 60 : title.length > 18 ? 68 : 76;
@@ -221,19 +300,19 @@ function patchMetadata(html: string, config: RouteConfig): string {
     .replace(/(<meta\s+property="og:image"\s+content=")[^"]*(")/g, `$1${imageUrl}$2`)
     .replace(/(<meta\s+name="twitter:image"\s+content=")[^"]*(")/g, `$1${imageUrl}$2`);
 
-  const title = config.routePath === '/' ? config.title : `${config.title} — Wraith Protocol`;
+  const displayTitle = config.routePath === '/' ? config.title : `${config.title} — Wraith Protocol`;
   const desc = config.subtitle;
 
   patched = patched
-    .replace(/<title>[^<]*<\/title>/g, `<title>${title}</title>`)
-    .replace(/(<meta\s+property="og:title"\s+content=")[^"]*(")/g, `$1${title}$2`)
-    .replace(/(<meta\s+name="twitter:title"\s+content=")[^"]*(")/g, `$1${title}$2`);
+    .replace(/<title>[^<]*<\/title>/g, `<title>${escapeHtml(displayTitle)}</title>`)
+    .replace(/(<meta\s+property="og:title"\s+content=")[^"]*(")/g, `$1${escapeHtml(displayTitle)}$2`)
+    .replace(/(<meta\s+name="twitter:title"\s+content=")[^"]*(")/g, `$1${escapeHtml(displayTitle)}$2`);
 
   if (desc) {
     patched = patched
-      .replace(/(<meta\s+name="description"\s+content=")[^"]*(")/g, `$1${desc}$2`)
-      .replace(/(<meta\s+property="og:description"\s+content=")[^"]*(")/g, `$1${desc}$2`)
-      .replace(/(<meta\s+name="twitter:description"\s+content=")[^"]*(")/g, `$1${desc}$2`);
+      .replace(/(<meta\s+name="description"\s+content=")[^"]*(")/g, `$1${escapeHtml(desc)}$2`)
+      .replace(/(<meta\s+property="og:description"\s+content=")[^"]*(")/g, `$1${escapeHtml(desc)}$2`)
+      .replace(/(<meta\s+name="twitter:description"\s+content=")[^"]*(")/g, `$1${escapeHtml(desc)}$2`);
   }
 
   // Breadcrumb JSON-LD
@@ -273,6 +352,20 @@ function patchMetadata(html: string, config: RouteConfig): string {
   return patched;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function getRouteOutputDir(routePath: string): string {
+  if (routePath === '/') return distDir;
+  const cleaned = routePath.slice(1);
+  return join(distDir, cleaned);
+}
+
 async function main() {
   if (!existsSync(distDir)) {
     console.error('dist/ not found — run `pnpm build` first');
@@ -299,25 +392,24 @@ async function main() {
 
   const baseHtml = readFileSync(join(distDir, 'index.html'), 'utf8');
 
-  for (const config of routes) {
+  const allRoutes = [...routes, ...getBlogRoutes(), ...getCaseStudyRoutes()];
+
+  for (const config of allRoutes) {
     process.stdout.write(`og: ${config.slug}.png ... `);
     const png = await renderPng(config, fonts);
     writeFileSync(join(ogDir, `${config.slug}.png`), png);
 
     const html = patchMetadata(baseHtml, config);
 
-    if (config.routePath === '/') {
-      writeFileSync(join(distDir, 'index.html'), html, 'utf8');
-    } else {
-      const routeDir = join(distDir, config.slug);
-      mkdirSync(routeDir, { recursive: true });
-      writeFileSync(join(routeDir, 'index.html'), html, 'utf8');
-    }
+    const routeDir = getRouteOutputDir(config.routePath);
+    mkdirSync(routeDir, { recursive: true });
+    writeFileSync(join(routeDir, 'index.html'), html, 'utf8');
 
     console.log('done');
   }
 
   console.log('og: all images generated →', ogDir);
+  console.log(`og: ${allRoutes.length} routes processed`);
 }
 
 main().catch((err) => {
