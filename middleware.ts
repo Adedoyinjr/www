@@ -2,9 +2,7 @@ import {
   resolveRouteMetadata,
   isIndexableRoute,
   ogImageSlugFor,
-  SITE_URL,
   CACHE_CONTROL,
-  Locale,
 } from './src/utils/og-metadata';
 
 export const config = {
@@ -27,47 +25,6 @@ const BOT_USER_AGENTS = [
   'baiduspider',
 ];
 
-const INDEXABLE_PATHS = [
-  '/',
-  '/faq',
-  '/privacy',
-  '/newsletter',
-  '/use-cases',
-  '/roadmap',
-  '/stellar',
-  '/grants',
-  '/about',
-  '/contributors',
-  '/blog',
-  '/case-studies',
-  '/careers',
-  '/vitals',
-];
-
-function stripLocalePrefix(pathname: string): { pathname: string; locale: Locale } {
-  if (pathname === '/es' || pathname.startsWith('/es/')) {
-    return {
-      pathname: pathname === '/es' ? '/' : pathname.slice(3),
-      locale: 'es',
-    };
-  }
-  if (pathname === '/en' || pathname.startsWith('/en/')) {
-    return {
-      pathname: pathname === '/en' ? '/' : pathname.slice(4),
-      locale: 'en',
-    };
-  }
-  return { pathname, locale: 'en' };
-}
-
-function isIndexablePath(pathname: string): boolean {
-  const { pathname: cleanPath } = stripLocalePrefix(pathname);
-  if (INDEXABLE_PATHS.includes(cleanPath)) return true;
-  if (cleanPath.match(/^\/blog\/(.+)$/)) return true;
-  if (cleanPath.match(/^\/case-studies\/(.+)$/)) return true;
-  return false;
-}
-
 function escapeHtmlAttr(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -86,7 +43,7 @@ export default async function middleware(request: Request) {
     return;
   }
 
-  if (!isIndexablePath(url.pathname)) {
+  if (!isIndexableRoute(url.pathname)) {
     return;
   }
 

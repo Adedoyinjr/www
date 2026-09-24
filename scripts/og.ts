@@ -368,7 +368,7 @@ function getRouteOutputDir(routePath: string): string {
 
 async function main() {
   if (!existsSync(distDir)) {
-    console.error('dist/ not found — run `pnpm build` first');
+    console.error('dist/ not found — run `npm run build` first');
     process.exit(1);
   }
 
