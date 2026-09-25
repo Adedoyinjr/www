@@ -2,6 +2,7 @@ import { writeFileSync, readFileSync, readdirSync, statSync, existsSync } from '
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { slugifyTag, parseTags } from './feed-utils.mjs';
+import { getPosts } from './gen-rss.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
@@ -60,6 +61,12 @@ function getAuthorRoutes(): string[] {
     // ignore
   }
   return routes;
+}
+
+function getBlogPostRoutes(): string[] {
+  // Individual posts are client-rendered, so they never appear as directories
+  // in `dist/` and have to be listed explicitly or search engines miss them.
+  return getPosts().map((post) => `/blog/${post.slug}`);
 }
 
 function getRoutes(dir: string, base = ''): string[] {
@@ -128,8 +135,16 @@ try {
   const authorRoutes = getAuthorRoutes();
   const distRoutes = existsSync(distDir) ? getRoutes(distDir) : [];
   const tagRoutes = getBlogTagRoutes();
+  const postRoutes = getBlogPostRoutes();
   const allRoutes = Array.from(
-    new Set([...knownRoutes, ...csRoutes, ...authorRoutes, ...tagRoutes, ...distRoutes]),
+    new Set([
+      ...knownRoutes,
+      ...csRoutes,
+      ...authorRoutes,
+      ...tagRoutes,
+      ...postRoutes,
+      ...distRoutes,
+    ]),
   ).filter((r) => r && r !== '/404' && !r.includes('/staging') && !r.includes('/preview'));
 
   const today = new Date().toISOString().split('T')[0];

@@ -20,6 +20,7 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint:i18n
       - run: pnpm test:a11y
+      - run: pnpm test:seo
       - run: pnpm build
       - run: pnpm validate:jsonld
 
