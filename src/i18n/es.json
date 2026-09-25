@@ -323,7 +323,62 @@
     "siteTitle": "Wraith Protocol — Pagos privados para cada cadena",
     "metaDescription": "Wraith Protocol habilita pagos privados en cualquier blockchain usando direcciones ocultas. Un SDK, múltiples cadenas.",
     "ogTitle": "Wraith Protocol",
-    "ogDescription": "Pagos privados para cada cadena. Direcciones ocultas, SDK multicadena y agentes de privacidad con IA."
+    "ogDescription": "Pagos privados para cada cadena. Direcciones ocultas, SDK multicadena y agentes de privacidad con IA.",
+    "routes": {
+      "/": {
+        "title": "Wraith Protocol",
+        "subtitle": "Pagos privados para cada cadena",
+        "chainBadge": "EVM · Stellar"
+      },
+      "/stellar": {
+        "title": "Integración Stellar",
+        "subtitle": "Direcciones ocultas nativas en la red Stellar",
+        "chainBadge": "Stellar"
+      },
+      "/roadmap": { "title": "Hoja de Ruta", "subtitle": "El futuro de Wraith" },
+      "/use-cases": { "title": "Casos de Uso", "subtitle": "Quién usa Wraith Protocol y por qué" },
+      "/faq": {
+        "title": "Preguntas Frecuentes",
+        "subtitle": "Todo lo que necesitas saber sobre Wraith Protocol"
+      },
+      "/privacy": {
+        "title": "Política de Privacidad",
+        "subtitle": "Cómo manejamos tus datos — spoiler: no recopilamos ninguno"
+      },
+      "/blog": {
+        "title": "Blog",
+        "subtitle": "Actualizaciones, guías y análisis del equipo de Wraith"
+      },
+      "/newsletter": {
+        "title": "Boletín",
+        "subtitle": "Actualizaciones de mainnet, avisos de seguridad y noticias de subvenciones — sin rastreo"
+      },
+      "/case-studies": {
+        "title": "Casos de Estudio",
+        "subtitle": "Soluciones de privacidad del mundo real construidas con Wraith Protocol"
+      },
+      "/grants": {
+        "title": "Subvenciones",
+        "subtitle": "Construye pagos privados. Obtén financiación.",
+        "chainBadge": "Stellar · EVM"
+      },
+      "/about": {
+        "title": "Acerca de",
+        "subtitle": "Construyendo infraestructura de pagos que preserva la privacidad para todos."
+      },
+      "/careers": {
+        "title": "Carreras",
+        "subtitle": "Recompensas de código abierto y trabajo contractual remunerado."
+      },
+      "/contributors": {
+        "title": "Colaboradores",
+        "subtitle": "Las personas que construyen y mejoran Wraith Protocol."
+      },
+      "/vitals": {
+        "title": "Web Vitals",
+        "subtitle": "Telemetría de rendimiento de usuarios reales para usewraith.xyz."
+      }
+    }
   },
   "caseStudies": {
     "eyebrow": "CASOS DE ESTUDIO",

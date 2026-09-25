@@ -167,6 +167,24 @@ describe('og-metadata: localization', () => {
     expect(meta!.title).toBe('Subvenciones — Wraith Protocol');
   });
 
+  it('resolves localized OG image content without changing the public URL', () => {
+    const english = resolveRouteMetadata('/grants');
+    const spanish = resolveRouteMetadata('/es/grants');
+
+    expect(english).not.toBeNull();
+    expect(spanish).not.toBeNull();
+    expect(english!.locale).toBe('en');
+    expect(spanish!.locale).toBe('es');
+    expect(english!.ogImage.title).toBe('Grants');
+    expect(english!.ogImage.subtitle).toBe('Build private payments. Get funded.');
+    expect(spanish!.ogImage.title).toBe('Subvenciones');
+    expect(spanish!.ogImage.title).not.toBe(english!.ogImage.title);
+    expect(spanish!.ogImage.subtitle).toBe('Construye pagos privados. Obtén financiación.');
+    expect(spanish!.ogImage.subtitle).not.toBe(english!.ogImage.subtitle);
+    expect(spanish!.ogUrl).toBe(english!.ogUrl);
+    expect(ogImageSlugFor('/es/grants', spanish!.locale)).toBe('es-grants');
+  });
+
   it('resolves English locale for /en/ prefix', () => {
     const meta = resolveRouteMetadata('/en/blog/wave-7-kickoff');
     expect(meta).not.toBeNull();

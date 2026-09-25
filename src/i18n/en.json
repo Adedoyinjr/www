@@ -323,7 +323,59 @@
     "siteTitle": "Wraith Protocol — Private payments for every chain",
     "metaDescription": "Wraith Protocol enables private payments on any blockchain using stealth addresses. One SDK, multiple chains.",
     "ogTitle": "Wraith Protocol",
-    "ogDescription": "Private payments for every chain. Stealth addresses, multichain SDK, and AI-powered privacy agents."
+    "ogDescription": "Private payments for every chain. Stealth addresses, multichain SDK, and AI-powered privacy agents.",
+    "routes": {
+      "/": {
+        "title": "Wraith Protocol",
+        "subtitle": "Private payments for every chain",
+        "chainBadge": "EVM · Stellar"
+      },
+      "/stellar": {
+        "title": "Stellar Integration",
+        "subtitle": "Native stealth addresses on the Stellar network",
+        "chainBadge": "Stellar"
+      },
+      "/roadmap": { "title": "Roadmap", "subtitle": "The future of Wraith" },
+      "/use-cases": { "title": "Use Cases", "subtitle": "Who uses Wraith Protocol and why" },
+      "/faq": { "title": "FAQ", "subtitle": "Everything you need to know about Wraith Protocol" },
+      "/privacy": {
+        "title": "Privacy Policy",
+        "subtitle": "How we handle your data — spoiler: we don't collect any"
+      },
+      "/blog": {
+        "title": "Blog",
+        "subtitle": "Updates, guides, and deep dives from the Wraith team"
+      },
+      "/newsletter": {
+        "title": "Newsletter",
+        "subtitle": "Mainnet updates, security advisories, and grant news — no tracking"
+      },
+      "/case-studies": {
+        "title": "Case Studies",
+        "subtitle": "Real-world privacy solutions built on Wraith Protocol"
+      },
+      "/grants": {
+        "title": "Grants",
+        "subtitle": "Build private payments. Get funded.",
+        "chainBadge": "Stellar · EVM"
+      },
+      "/about": {
+        "title": "About",
+        "subtitle": "Building privacy-preserving payment infrastructure for everyone."
+      },
+      "/careers": {
+        "title": "Careers",
+        "subtitle": "Open-source bounties and paid contract work."
+      },
+      "/contributors": {
+        "title": "Contributors",
+        "subtitle": "The people building and improving Wraith Protocol."
+      },
+      "/vitals": {
+        "title": "Web Vitals",
+        "subtitle": "Real-user performance telemetry for usewraith.xyz."
+      }
+    }
   },
   "caseStudies": {
     "eyebrow": "CASE STUDIES",

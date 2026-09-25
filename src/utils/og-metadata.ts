@@ -15,6 +15,8 @@ export interface OgImageConfig {
   chainBadge?: string;
 }
 
+type LocalizedOgRoutes = Record<string, OgImageConfig>;
+
 export interface RouteMetadata {
   title: string;
   description: string;
@@ -226,6 +228,9 @@ function getStaticRouteConfig(routePath: string, locale: Locale) {
   const config = STATIC_ROUTES[routePath];
   if (!config) return null;
 
+  const strings = locale === 'es' ? esStrings : enStrings;
+  const localizedOgImage = (strings.og.routes as LocalizedOgRoutes)[routePath];
+
   let title = config.title;
   if (locale === 'es') {
     const translated = lookupLocaleTitle(routePath, 'es');
@@ -237,7 +242,7 @@ function getStaticRouteConfig(routePath: string, locale: Locale) {
   return {
     title,
     description: config.description,
-    ogImage: config.ogImage,
+    ogImage: localizedOgImage ?? config.ogImage,
     ogType: config.ogType,
   };
 }

@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import React from 'react';
+import { resolveRouteMetadata } from '../src/utils/og-metadata';
 
 const h = React.createElement;
 
@@ -379,6 +380,22 @@ function getRouteOutputDir(routePath: string): string {
   return join(distDir, cleaned);
 }
 
+function getLocalizedRouteConfig(config: RouteConfig, locale: 'en' | 'es'): RouteConfig {
+  const localizedPath =
+    locale === 'en' ? config.routePath : `/es${config.routePath === '/' ? '' : config.routePath}`;
+  const metadata = resolveRouteMetadata(localizedPath);
+
+  if (!metadata) return config;
+
+  return {
+    ...config,
+    slug: locale === 'en' ? config.slug : `es-${config.slug}`,
+    title: metadata.ogImage.title,
+    subtitle: metadata.ogImage.subtitle ?? config.subtitle,
+    chainBadge: metadata.ogImage.chainBadge,
+  };
+}
+
 async function main() {
   if (!existsSync(distDir)) {
     console.error('dist/ not found — run `npm run build` first');
@@ -408,11 +425,12 @@ async function main() {
   const allRoutes = [...routes, ...getBlogRoutes(), ...getCaseStudyRoutes()];
 
   for (const config of allRoutes) {
-    process.stdout.write(`og: ${config.slug}.png ... `);
-    const png = await renderPng(config, fonts);
-    writeFileSync(join(ogDir, `${config.slug}.png`), png);
+    const englishConfig = getLocalizedRouteConfig(config, 'en');
+    process.stdout.write(`og: ${englishConfig.slug}.png ... `);
+    const png = await renderPng(englishConfig, fonts);
+    writeFileSync(join(ogDir, `${englishConfig.slug}.png`), png);
 
-    const html = patchMetadata(baseHtml, config);
+    const html = patchMetadata(baseHtml, englishConfig);
 
     const routeDir = getRouteOutputDir(config.routePath);
     mkdirSync(routeDir, { recursive: true });
@@ -422,10 +440,10 @@ async function main() {
 
     for (const locale of ['en', 'es']) {
       if (locale === 'en') continue;
-      const localizedSlug = `${locale}-${config.slug}`;
-      process.stdout.write(`og: ${localizedSlug}.png ... `);
-      const localizedPng = await renderPng(config, fonts);
-      writeFileSync(join(ogDir, `${localizedSlug}.png`), localizedPng);
+      const localizedConfig = getLocalizedRouteConfig(config, locale);
+      process.stdout.write(`og: ${localizedConfig.slug}.png ... `);
+      const localizedPng = await renderPng(localizedConfig, fonts);
+      writeFileSync(join(ogDir, `${localizedConfig.slug}.png`), localizedPng);
       console.log('done');
     }
   }
