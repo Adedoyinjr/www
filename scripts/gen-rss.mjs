@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { slugifyTag, parseTags } from './feed-utils.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,6 +21,30 @@ function escapeXml(value) {
 
 function toRfc822(date) {
   return new Date(date).toUTCString();
+}
+
+let authorsCache = null;
+let optOutCache = null;
+
+function resolveAuthorName(authorId) {
+  if (!authorId) return 'Wraith Team';
+  try {
+    if (!authorsCache) {
+      const aPath = join(rootDir, 'src', 'data', 'authors.json');
+      authorsCache = existsSync(aPath) ? JSON.parse(readFileSync(aPath, 'utf8')) : {};
+    }
+    if (!optOutCache) {
+      const oPath = join(rootDir, 'src', 'data', 'authors-optout.json');
+      optOutCache = existsSync(oPath) ? JSON.parse(readFileSync(oPath, 'utf8')) : [];
+    }
+  } catch {
+    return authorId;
+  }
+  if (optOutCache.includes(authorId)) return 'Wraith Team';
+  const author = authorsCache[authorId];
+  if (author && author.optIn) return author.name;
+  if (author && !author.optIn) return 'Wraith Team';
+  return authorId;
 }
 
 function parseFrontmatter(content) {
@@ -66,7 +91,8 @@ export function getPosts() {
           excerpt: metadata.excerpt ?? '',
           content: content ?? '',
           publishedAt: metadata.publishedAt || metadata.date,
-          author: metadata.author ?? 'Wraith Protocol',
+          author: resolveAuthorName(metadata.author),
+          tags: parseTags(metadata.tags),
           url: metadata.url ?? `${siteUrl}/blog/${slug}`,
         });
       }
@@ -87,7 +113,8 @@ export function getPosts() {
               excerpt: post.excerpt ?? '',
               content: post.content ?? '',
               publishedAt: post.publishedAt || post.date,
-              author: post.author ?? 'Wraith Protocol',
+              author: resolveAuthorName(post.author),
+              tags: parseTags(post.tags),
               url: post.url ?? `${siteUrl}/blog/${post.slug}`,
             });
           }
@@ -103,7 +130,12 @@ export function getPosts() {
     .sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
 }
 
-export function buildRssFeed(posts, baseUrl = siteUrl) {
+export function buildRssFeed(posts, baseUrl = siteUrl, options = {}) {
+  const { tag } = options;
+  const title = tag ? `Wraith Protocol Blog — ${tag}` : 'Wraith Protocol Blog';
+  const selfPath = tag ? `/feed/tag/${slugifyTag(tag)}.xml` : '/feed.xml';
+  const channelLink = tag ? `${baseUrl}/blog/tag/${slugifyTag(tag)}` : `${baseUrl}/blog`;
+
   const items = posts
     .filter((post) => Boolean(post.publishedAt))
     .map((post) => {
@@ -124,12 +156,12 @@ export function buildRssFeed(posts, baseUrl = siteUrl) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Wraith Protocol Blog</title>
-    <link>${baseUrl}/blog</link>
+    <title>${escapeXml(title)}</title>
+    <link>${channelLink}</link>
     <description>Notes on stealth payments, private infrastructure, and the Wraith ecosystem.</description>
     <language>en-us</language>
     <lastBuildDate>${toRfc822(new Date().toISOString())}</lastBuildDate>
-    <atom:link href="${baseUrl}/feed.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="${baseUrl}${selfPath}" rel="self" type="application/rss+xml" />
 ${items ? `\n${items}\n` : ''}  </channel>
 </rss>`;
 }
@@ -141,13 +173,35 @@ function writeFeedFile(targetDir) {
   writeFileSync(join(targetDir, 'feed.xml'), feedXml, 'utf8');
 }
 
+function writeTagFeeds(targetDir) {
+  const posts = getPosts();
+  const tags = new Set();
+  posts.forEach((post) => {
+    (post.tags || []).forEach((tag) => tags.add(tag));
+  });
+
+  for (const tag of tags) {
+    const tagPosts = posts.filter((post) => (post.tags || []).includes(tag));
+    const feedXml = buildRssFeed(tagPosts, siteUrl, { tag });
+    const tagDir = join(targetDir, 'feed', 'tag');
+    mkdirSync(tagDir, { recursive: true });
+    writeFileSync(join(tagDir, `${slugifyTag(tag)}.xml`), feedXml, 'utf8');
+  }
+
+  return tags.size;
+}
+
 function main() {
   const posts = getPosts();
   writeFeedFile(publicDir);
+  const tagCount = writeTagFeeds(publicDir);
   if (existsSync(distDir)) {
     writeFeedFile(distDir);
+    writeTagFeeds(distDir);
   }
-  console.log(`feed.xml generated successfully with ${posts.length} posts.`);
+  console.log(
+    `feed.xml generated successfully with ${posts.length} posts across ${tagCount} tag feeds.`,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

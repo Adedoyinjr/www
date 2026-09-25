@@ -81,3 +81,90 @@ Drives the Showcase component on the homepage.
 ### Schema
 
 Contains `items` with `title`, `description`, and optional `link` and `tags`.
+
+## `authors.json`
+
+Powers blog author bylines and the `/blog/author/:id` author pages.
+
+MDX posts reference an author by `id` in their frontmatter (`author: 'lena-vogt'`). The id maps to an entry in this file.
+
+### Schema
+
+```typescript
+interface AuthorsData {
+  [id: string]: {
+    /** Display name shown in the byline and on the author page */
+    name: string;
+    /** Short biography shown on the author page */
+    bio: string;
+    /** Optional avatar URL; if omitted, initials are rendered */
+    avatar?: string;
+    /** Optional profile links rendered on the author page */
+    links?: {
+      website?: string;
+      github?: string;
+      twitter?: string;
+      email?: string;
+    };
+    /** When false the author collapses to "Wraith Team" and has no public page */
+    optIn: boolean;
+  };
+}
+```
+
+Opted-out authors (those in `authors-optout.json` or with `optIn: false`) collapse to the "Wraith Team" label in post bylines and never generate a page. Unknown author ids fall back gracefully to the raw string with no link.
+
+## `authors-optout.json`
+
+A flat array of author ids that should never get a public author page and collapse to "Wraith Team" in bylines.
+
+## `chains.json`
+
+Powers the /chains comparison matrix page.
+
+### Schema
+
+```typescript
+interface ChainsData {
+  /** Page heading */
+  title: string;
+  /** Introductory paragraph */
+  description: string;
+  /** Column definitions for the matrix table */
+  columns: Array<{
+    /** Internal key matching chain object properties */
+    key: string;
+    /** Display header label */
+    label: string;
+    /** Whether the column is sortable (numeric values) */
+    sortable: boolean;
+    /** Optional unit suffix displayed after the value */
+    unit?: string;
+  }>;
+  /** Chain entries displayed as matrix rows */
+  chains: Array<{
+    /** URL-safe identifier */
+    id: string;
+    /** Display name */
+    name: string;
+    /** Average block time in seconds */
+    blockTime: number;
+    /** Median transaction fee in USD */
+    medianFee: number;
+    /** Finality description (e.g. consensus mechanism) */
+    finality: string;
+    /** Supported wallet names */
+    wallets: string;
+    /** Integration status: live | testnet | devnet | planned */
+    status: string;
+    /** Audit information */
+    audit: string;
+    /** Link to chain-specific Wraith docs */
+    docs: string;
+    /** Expanded description shown in row detail */
+    description: string;
+  }>;
+}
+```
+
+Each chain entry must include a documented `description` explaining the chain's role in the Wraith ecosystem and a `docs` link pointing to the relevant integration guide.

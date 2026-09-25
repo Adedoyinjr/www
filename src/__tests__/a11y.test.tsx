@@ -10,6 +10,7 @@ const pages = [
   { path: '/roadmap', name: 'roadmap' },
   { path: '/privacy', name: 'privacy policy' },
   { path: '/use-cases', name: 'use cases' },
+  { path: '/use-cases/calculator', name: 'payment cost calculator' },
   { path: '/stellar', name: 'Stellar page' },
   { path: '/case-studies', name: 'case studies list' },
   { path: '/case-studies/payroll-processor', name: 'case study detail' },

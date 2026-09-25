@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import CostCalculator from '../components/CostCalculator';
 import Footer from '../components/Footer';
 
 type Persona = {
@@ -193,6 +194,8 @@ export default function UseCases() {
             </div>
           </div>
         </section>
+
+        <CostCalculator />
 
         {/* CTA */}
         <section className="border-t border-outline-variant-30 px-12 py-24">

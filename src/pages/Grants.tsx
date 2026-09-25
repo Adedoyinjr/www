@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { trackOutbound } from '../utils/track';
 import waveData from '../data/wave.json';
+import { howTo, SITE_URL } from '../utils/jsonld';
 
 type Wave = (typeof waveData)['currentWave'];
 type PastWave = (typeof waveData)['pastWaves'][number];
@@ -9,6 +11,38 @@ const currentWave = waveData.currentWave as Wave;
 const pastWaves = waveData.pastWaves as PastWave[];
 const faqEntries = waveData.faq as FaqEntry[];
 
+const grantsHowTo = howTo({
+  name: `How to apply for ${currentWave?.name ?? 'a Wraith grant'}`,
+  description:
+    'Follow these steps to submit a proposal and get funded through the Wraith grant program.',
+  url: `${SITE_URL}/grants`,
+  steps: [
+    {
+      name: 'Confirm eligibility',
+      text: `Review the eligibility criteria to ensure your project builds stealth address infrastructure, SDK integrations, or privacy-preserving payment tooling. Current criteria: ${(
+        currentWave?.eligibility ?? []
+      ).join(' ')}`,
+    },
+    {
+      name: 'Prepare your proposal',
+      text:
+        currentWave?.howToApply ??
+        'Include a clear scope, timeline, and budget breakdown with defined milestones.',
+    },
+    {
+      name: 'Submit on Drips',
+      text: `Open the Drips grant page and submit your proposal before the wave closes. Apply here: ${currentWave?.applyUrl}`,
+      url: currentWave?.applyUrl,
+    },
+    {
+      name: 'Await review',
+      text: `The Wraith team reviews proposals against the published review criteria: ${(
+        currentWave?.reviewCriteria ?? []
+      ).join(' ')}`,
+    },
+  ],
+});
+
 const labelStyles = 'font-mono text-[10px] font-semibold uppercase tracking-[1.8px] text-outline';
 
 export default function Grants() {
@@ -16,6 +50,10 @@ export default function Grants() {
 
   return (
     <div className="mx-auto flex max-w-[1120px] flex-col px-6 py-10 md:px-12 md:py-16">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(grantsHowTo) }}
+      />
       {/* Hero */}
       <section className="flex flex-col gap-6 border-b border-outline-variant pb-12">
         <span className={labelStyles}>Grants</span>
@@ -28,6 +66,7 @@ export default function Grants() {
             <a
               href="https://www.drips.network"
               target="_blank"
+              onClick={trackOutbound('other')}
               rel="noopener noreferrer"
               className="text-primary underline underline-offset-2 transition-colors hover:brightness-110"
             >
@@ -82,6 +121,7 @@ export default function Grants() {
               <a
                 href={currentWave.applyUrl}
                 target="_blank"
+                onClick={trackOutbound('other')}
                 rel="noopener noreferrer"
                 className="inline-flex h-11 w-fit items-center justify-center bg-primary px-6 font-heading text-[13px] font-semibold uppercase tracking-[1.5px] text-surface transition-[filter] duration-150 hover:brightness-110"
               >

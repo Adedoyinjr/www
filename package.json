@@ -9,7 +9,9 @@
     "og:generate": "tsx scripts/og.ts",
     "generate:sitemap": "node scripts/gen-sitemap.mjs",
     "preview": "vite preview",
+    "preview:functions": "node --import tsx scripts/preview-server.ts",
     "test": "vitest run",
+    "test:smoke": "vitest run tests/smoke",
     "test:e2e": "playwright test",
     "test:a11y": "vitest run src/__tests__/a11y.test.tsx",
     "test:a11y:playwright": "playwright test tests/a11y",
@@ -17,6 +19,7 @@
     "format:check": "prettier --check .",
     "lint:i18n": "node scripts/lint-i18n.mjs",
     "generate:og": "node scripts/generate-og.mjs",
+    "validate:jsonld": "tsx scripts/validate-jsonld.mjs",
     "prepare": "husky"
   },
   "dependencies": {
@@ -41,8 +44,8 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "@vercel/og": "^0.11.1",
     "@vitejs/plugin-react": "^6.0.1",
     "github-slugger": "^2.0.0",

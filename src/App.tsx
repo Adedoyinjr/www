@@ -26,16 +26,23 @@ const Faq = lazy(() => import('./pages/Faq'));
 const Privacy = lazy(() => import('./pages/Privacy'));
 const Newsletter = lazy(() => import('./pages/Newsletter'));
 const UseCases = lazy(() => import('./pages/UseCases'));
+const CostCalculatorPage = lazy(() => import('./pages/CostCalculatorPage'));
 const Stellar = lazy(() => import('./pages/Stellar'));
 const Roadmap = lazy(() => import('./pages/Roadmap'));
 const Grants = lazy(() => import('./pages/Grants'));
 const CaseStudies = lazy(() => import('./pages/CaseStudies'));
 const Careers = lazy(() => import('./pages/Careers'));
 const About = lazy(() => import('./pages/About'));
+const Governance = lazy(() => import('./pages/Governance'));
 const Vitals = lazy(() => import('./pages/Vitals'));
+const Security = lazy(() => import('./pages/Security'));
+const ThreatModel = lazy(() => import('./pages/ThreatModel'));
+const Status = lazy(() => import('./pages/Status'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Contributors = lazy(() => import('./pages/Contributors'));
 const Blog = lazy(() => import('./pages/Blog'));
+const Ecosystem = lazy(() => import('./pages/Ecosystem'));
+const ChainsPage = lazy(() => import('./pages/Chains'));
 
 function Home() {
   return (
@@ -80,10 +87,44 @@ export default function App() {
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/newsletter" element={<Newsletter />} />
             <Route path="/use-cases" element={<UseCases />} />
+            <Route path="/use-cases/calculator" element={<CostCalculatorPage />} />
             <Route path="/roadmap" element={<Roadmap />} />
             <Route path="/case-studies" element={<CaseStudies />} />
             <Route path="/case-studies/:slug" element={<CaseStudies />} />
+            <Route
+              path="/ecosystem"
+              element={
+                <Layout>
+                  <Ecosystem />
+                </Layout>
+              }
+            />
             <Route path="/vitals" element={<Vitals />} />
+            <Route
+              path="/security"
+              element={
+                <Layout>
+                  <Security />
+                </Layout>
+              }
+            />
+            <Route
+              path="/threat-model"
+              element={
+                <Layout>
+                  <ThreatModel />
+                </Layout>
+              }
+            />
+            {/* Status page route */}
+            <Route
+              path="/status"
+              element={
+                <Layout>
+                  <Status />
+                </Layout>
+              }
+            />
             {/* Wrap Stellar with Layout */}
             <Route
               path="/stellar"
@@ -118,6 +159,14 @@ export default function App() {
               }
             />
             <Route
+              path="/governance"
+              element={
+                <Layout>
+                  <Governance />
+                </Layout>
+              }
+            />
+            <Route
               path="/contributors"
               element={
                 <Layout>
@@ -134,10 +183,34 @@ export default function App() {
               }
             />
             <Route
+              path="/blog/tag/:tagSlug"
+              element={
+                <Layout>
+                  <Blog />
+                </Layout>
+              }
+            />
+            <Route
               path="/blog/:slug"
               element={
                 <Layout>
                   <Blog />
+                </Layout>
+              }
+            />
+            <Route
+              path="/blog/author/:authorId"
+              element={
+                <Layout>
+                  <Blog />
+                </Layout>
+              }
+            />
+            <Route
+              path="/chains"
+              element={
+                <Layout>
+                  <ChainsPage />
                 </Layout>
               }
             />

@@ -7,6 +7,7 @@ const pages = [
   { path: '/roadmap', name: 'roadmap' },
   { path: '/privacy', name: 'privacy policy' },
   { path: '/use-cases', name: 'use cases' },
+  { path: '/use-cases/calculator', name: 'payment cost calculator' },
   { path: '/stellar', name: 'Stellar page' },
   { path: '/case-studies', name: 'case studies list' },
   { path: '/case-studies/payroll-processor', name: 'case study detail' },
@@ -46,13 +47,33 @@ test('keyboard navigation works on homepage', async ({ page }) => {
 });
 
 test('skip link is present on pages that use it', async ({ page }) => {
-  const pagesWithSkipLink = ['/', '/use-cases', '/roadmap'];
+  const pagesWithSkipLink = ['/', '/use-cases', '/use-cases/calculator', '/roadmap'];
 
   for (const path of pagesWithSkipLink) {
     await page.goto(path);
     const skipLink = page.locator('.skip-link');
     await expect(skipLink).toBeVisible();
   }
+});
+
+test('cost calculator is fully keyboard operable', async ({ page }) => {
+  await page.goto('/use-cases/calculator?chain=stellar&payments=1000&avg=100');
+
+  const chain = page.getByLabel('Chain');
+  await chain.focus();
+  await expect(chain).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Payments per month')).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Average payment value (USD)')).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Copy scenario link' })).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Reset' })).toBeFocused();
 });
 
 test('reduced-motion preference is respected', async ({ page }) => {

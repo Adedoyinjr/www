@@ -136,10 +136,18 @@
       "liveTestnet": "EN VIVO EN TESTNET",
       "liveDevnet": "EN VIVO EN DEVNET"
     },
-    "horizen": { "meta": "EVM · Asegurado por TEE · ERC-5564" },
-    "stellar": { "meta": "Soroban · Basado en memo" },
-    "solana": { "meta": "Tokens SPL · Programa de memo" },
-    "ckb": { "meta": "Modelo de células · Integración CCC" }
+    "horizen": {
+      "meta": "EVM · Asegurado por TEE · ERC-5564"
+    },
+    "stellar": {
+      "meta": "Soroban · Basado en memo"
+    },
+    "solana": {
+      "meta": "Tokens SPL · Programa de memo"
+    },
+    "ckb": {
+      "meta": "Modelo de células · Integración CCC"
+    }
   },
   "compare": {
     "eyebrow": "Análisis Comparativo",
@@ -273,7 +281,8 @@
       "product": "PRODUCTO",
       "developers": "DESARROLLADORES",
       "resources": "RECURSOS",
-      "acknowledgments": "AGRADECIMIENTOS"
+      "acknowledgments": "AGRADECIMIENTOS",
+      "trust": "TRUST"
     },
     "product": {
       "docs": "Docs",
@@ -301,6 +310,12 @@
     "legal": {
       "privacy": "Privacidad",
       "terms": "Términos",
+      "securityTxt": "Security.txt"
+    },
+    "trust": {
+      "security": "Seguridad",
+      "privacy": "Privacidad",
+      "vitals": "Web Vitals",
       "securityTxt": "Security.txt"
     }
   },
@@ -345,6 +360,20 @@
     "description": "Historias de producción de equipos usando Wraith.",
     "viewAll": "VER TODOS",
     "readMore": "Leer Más"
+  },
+  "privacyComparison": {
+    "legend": {
+      "publicData": "Datos Públicos",
+      "privateData": "Datos Privados"
+    }
+  },
+  "stealthAnimation": {
+    "benefits": {
+      "unlinkable": "Las direcciones del remitente y receptor nunca se vinculan en cadena",
+      "oneTime": "Cada pago usa una dirección única de un solo uso",
+      "passive": "Solo el destinatario puede detectar y acceder a sus pagos",
+      "noCoordination": "No se requiere coordinación—meta-dirección publicada una vez"
+    }
   },
   "newsletter": {
     "eyebrow": "MANTENTE AL DÍA",
