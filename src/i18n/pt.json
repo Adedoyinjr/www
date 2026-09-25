@@ -323,61 +323,137 @@
     "siteTitle": "Wraith Protocol — Pagamentos privados para cada rede",
     "metaDescription": "Wraith Protocol permite pagamentos privados em qualquer blockchain usando endereços ocultos. Um SDK, múltiplas redes.",
     "ogTitle": "Wraith Protocol",
-    "ogDescription": "Pagamentos privados para cada rede. Endereços ocultos, SDK multi-rede e agentes de privacidade com IA.",
-    "routes": {
-      "/": {
+    "ogDescription": "Pagamentos privados para cada rede. Endereços ocultos, SDK multi-rede e agentes de privacidade com IA."
+  },
+  "ogRoutes": {
+    "/": {
+      "title": "Wraith Protocol",
+      "description": "Pagamentos privados para cada rede. Endereços ocultos, SDK multi-rede e agentes de privacidade com IA.",
+      "ogImage": {
         "title": "Wraith Protocol",
         "subtitle": "Pagamentos privados para cada rede",
         "chainBadge": "EVM · Stellar"
       },
-      "/stellar": {
-        "title": "Integração com Stellar",
-        "subtitle": "Endereços ocultos nativos na rede Stellar",
-        "chainBadge": "Stellar"
-      },
-      "/roadmap": { "title": "Roteiro", "subtitle": "O futuro do Wraith" },
-      "/use-cases": { "title": "Casos de Uso", "subtitle": "Quem usa o Wraith Protocol e por quê" },
-      "/faq": {
-        "title": "Perguntas frequentes",
-        "subtitle": "Tudo o que você precisa saber sobre o Wraith Protocol"
-      },
-      "/privacy": {
-        "title": "Política de Privacidade",
-        "subtitle": "Como lidamos com seus dados — spoiler: não coletamos nenhum"
-      },
-      "/blog": {
+      "ogType": "website"
+    },
+    "/blog": {
+      "title": "Blog — Wraith Protocol",
+      "description": "Atualizações, guias e análises aprofundadas da equipe Wraith.",
+      "ogImage": {
         "title": "Blog",
-        "subtitle": "Atualizações, guias e análises aprofundadas da equipe Wraith"
+        "subtitle": "Atualizações, guias e análises da equipe Wraith"
       },
-      "/newsletter": {
-        "title": "Boletim informativo",
-        "subtitle": "Atualizações da mainnet, alertas de segurança e novidades sobre subsídios — sem rastreamento"
+      "ogType": "website"
+    },
+    "/case-studies": {
+      "title": "Casos de Estudo — Wraith Protocol",
+      "description": "Soluções de privacidade reais construídas sobre o Wraith Protocol. De processadores de folha de pagamento a DAOs.",
+      "ogImage": {
+        "title": "Casos de Estudo",
+        "subtitle": "Soluções de privacidade reais sobre o Wraith Protocol"
       },
-      "/case-studies": {
-        "title": "Estudos de Caso",
-        "subtitle": "Soluções de privacidade do mundo real construídas com o Wraith Protocol"
+      "ogType": "website"
+    },
+    "/careers": {
+      "title": "Carreiras — Wraith Protocol",
+      "description": "Recompensas de código aberto e trabalho por contrato no Wraith Protocol.",
+      "ogImage": {
+        "title": "Carreiras",
+        "subtitle": "Recompensas de código aberto e trabalho por contrato"
       },
-      "/grants": {
-        "title": "Subsídios",
+      "ogType": "website"
+    },
+    "/contributors": {
+      "title": "Colaboradores — Wraith Protocol",
+      "description": "As pessoas que construem e melhoram o Wraith Protocol.",
+      "ogImage": {
+        "title": "Colaboradores",
+        "subtitle": "As pessoas que constroem e melhoram o Wraith Protocol"
+      },
+      "ogType": "website"
+    },
+    "/faq": {
+      "title": "Perguntas Frequentes — Wraith Protocol",
+      "description": "Perguntas frequentes sobre o Wraith Protocol e endereços ocultos.",
+      "ogImage": {
+        "title": "Perguntas Frequentes",
+        "subtitle": "Perguntas frequentes sobre o Wraith Protocol"
+      },
+      "ogType": "website"
+    },
+    "/grants": {
+      "title": "Bolsas — Wraith Protocol",
+      "description": "O Wraith Protocol mantém um programa de bolsas para infraestrutura de privacidade. Construa pagamentos privados e receba financiamento.",
+      "ogImage": {
+        "title": "Bolsas",
         "subtitle": "Construa pagamentos privados. Receba financiamento.",
         "chainBadge": "Stellar · EVM"
       },
-      "/about": {
+      "ogType": "website"
+    },
+    "/about": {
+      "title": "Sobre — Wraith Protocol",
+      "description": "Construindo infraestrutura de pagamentos que preserva a privacidade para todos.",
+      "ogImage": {
         "title": "Sobre",
-        "subtitle": "Construindo infraestrutura de pagamentos que preserva a privacidade para todos."
+        "subtitle": "Infraestrutura de pagamentos que preserva a privacidade"
       },
-      "/careers": {
-        "title": "Carreiras",
-        "subtitle": "Recompensas de código aberto e trabalho contratado remunerado."
+      "ogType": "website"
+    },
+    "/newsletter": {
+      "title": "Newsletter — Wraith Protocol",
+      "description": "Atualizações de mainnet, avisos de segurança e notícias de bolsas, sem rastreamento.",
+      "ogImage": {
+        "title": "Newsletter",
+        "subtitle": "Atualizações de mainnet, avisos de segurança e bolsas"
       },
-      "/contributors": {
-        "title": "Colaboradores",
-        "subtitle": "As pessoas que constroem e melhoram o Wraith Protocol."
+      "ogType": "website"
+    },
+    "/privacy": {
+      "title": "Política de Privacidade — Wraith Protocol",
+      "description": "Como lidamos com seus dados — spoiler: não coletamos nenhum.",
+      "ogImage": {
+        "title": "Política de Privacidade",
+        "subtitle": "Não coletamos seus dados — é simples assim"
       },
-      "/vitals": {
+      "ogType": "website"
+    },
+    "/roadmap": {
+      "title": "Roteiro — Wraith Protocol",
+      "description": "O futuro do Wraith Protocol — um roteiro público dos próximos recursos.",
+      "ogImage": {
+        "title": "Roteiro",
+        "subtitle": "O futuro do Wraith"
+      },
+      "ogType": "website"
+    },
+    "/stellar": {
+      "title": "Integração Stellar — Wraith Protocol",
+      "description": "Suporte nativo a endereços ocultos na rede Stellar com metadados baseados em memo.",
+      "ogImage": {
+        "title": "Integração Stellar",
+        "subtitle": "Endereços ocultos nativos na rede Stellar",
+        "chainBadge": "Stellar"
+      },
+      "ogType": "website"
+    },
+    "/use-cases": {
+      "title": "Casos de Uso — Wraith Protocol",
+      "description": "Quem usa o Wraith Protocol e por quê — de folha de pagamento a DAOs.",
+      "ogImage": {
+        "title": "Casos de Uso",
+        "subtitle": "Quem usa o Wraith Protocol e por quê"
+      },
+      "ogType": "website"
+    },
+    "/vitals": {
+      "title": "Painel de Web Vitals — Wraith Protocol",
+      "description": "Telemetria de desempenho real de usuários para usewraith.xyz.",
+      "ogImage": {
         "title": "Web Vitals",
-        "subtitle": "Telemetria de desempenho de usuários reais para usewraith.xyz."
-      }
+        "subtitle": "Telemetria de desempenho real de usuários"
+      },
+      "ogType": "website"
     }
   },
   "caseStudies": {

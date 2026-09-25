@@ -3,6 +3,7 @@ import {
   isIndexableRoute,
   ogImageSlugFor,
   CACHE_CONTROL,
+  OG_LOCALE_TAGS,
 } from './src/utils/og-metadata';
 
 export const config = {
@@ -65,7 +66,7 @@ export default async function middleware(request: Request) {
             ? `&subtitle=${encodeURIComponent(metadata.ogImage.subtitle)}`
             : ''
         }${metadata.ogImage.chainBadge ? `&badge=${encodeURIComponent(metadata.ogImage.chainBadge)}` : ''}${
-          metadata.locale === 'es' ? '&lang=es' : ''
+          metadata.locale === 'en' ? '' : `&lang=${metadata.locale}`
         }`;
 
     const title = metadata.title;
@@ -86,13 +87,13 @@ export default async function middleware(request: Request) {
       `<meta name="twitter:image" content="${escapeHtmlAttr(ogImageUrl)}" />`,
     ].join('\n      ');
 
-    const localeTag = `<meta property="og:locale" content="${metadata.locale === 'en' ? 'en_US' : 'es_ES'}" />`;
+    const localeTag = `<meta property="og:locale" content="${OG_LOCALE_TAGS[metadata.locale]}" />`;
 
     html = html.replace('</head>', `${customMetaTags}\n      ${localeTag}\n    </head>`);
 
     html = html.replace(/<title>[^<]*<\/title>/g, `<title>${escapeHtmlAttr(title)}</title>`);
 
-    html = html.replace(/<html lang="(en|es)">/i, `<html lang="${metadata.locale}">`);
+    html = html.replace(/<html lang="(en|es|pt)"\s*>/i, `<html lang="${metadata.locale}">`);
 
     const headers = new Headers();
     headers.set('content-type', 'text/html;charset=UTF-8');

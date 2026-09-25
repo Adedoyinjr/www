@@ -269,6 +269,73 @@ describe('middleware: localization', () => {
     expect(html).toContain('lang="es"');
   });
 
+  it('injects Spanish description for /es/grants', async () => {
+    const { response } = await makeRequest(
+      '/es/grants',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).toContain(
+      'Wraith Protocol mantiene un programa de subvenciones para infraestructura de privacidad',
+    );
+    expect(html).not.toContain('runs a grant program for privacy infrastructure');
+  });
+
+  it('injects Portuguese title and description for /pt/grants', async () => {
+    const { response } = await makeRequest(
+      '/pt/grants',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).toContain('Bolsas — Wraith Protocol');
+    expect(html).toContain(
+      'O Wraith Protocol mantém um programa de bolsas para infraestrutura de privacidade',
+    );
+    expect(html).not.toContain('runs a grant program for privacy infrastructure');
+    expect(html).toContain('lang="pt"');
+  });
+
+  it('injects Portuguese title for /pt/stellar', async () => {
+    const { response } = await makeRequest(
+      '/pt/stellar',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).toContain('Integração Stellar');
+    expect(html).toContain('lang="pt"');
+  });
+
+  it('preserves the locale in og:url for localized routes', async () => {
+    const es = await makeRequest(
+      '/es/grants',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const esHtml = await es.response!.text();
+    expect(esHtml).toContain('og:url" content="https://usewraith.xyz/es/grants"');
+
+    const pt = await makeRequest(
+      '/pt/blog/wave-7-kickoff',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const ptHtml = await pt.response!.text();
+    expect(ptHtml).toContain('og:url" content="https://usewraith.xyz/pt/blog/wave-7-kickoff"');
+  });
+
+  it('keeps the English og:url unprefixed', async () => {
+    const { response } = await makeRequest(
+      '/grants',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).toContain('og:url" content="https://usewraith.xyz/grants"');
+  });
+
   it('injects og:locale en_US for English', async () => {
     const { response } = await makeRequest(
       '/',
@@ -287,6 +354,17 @@ describe('middleware: localization', () => {
     );
     const html = await response!.text();
     expect(html).toContain('og:locale" content="es_ES"');
+  });
+
+  it('injects og:locale pt_BR for Portuguese', async () => {
+    const { response } = await makeRequest(
+      '/pt/',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).toContain('og:locale" content="pt_BR"');
+    expect(html).toContain('lang="pt"');
   });
 
   it('handles /en/ prefix correctly', async () => {
@@ -324,6 +402,32 @@ describe('middleware: localization', () => {
     expect(html).not.toContain('og/grants.png');
     expect(html).toContain('og/es-grants.png');
     expect(html).toContain('lang="es"');
+  });
+
+  it('uses locale-specific OG image for /pt/grants', async () => {
+    const { response } = await makeRequest(
+      '/pt/grants',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).not.toContain('og/grants.png');
+    expect(html).not.toContain('og/es-grants.png');
+    expect(html).toContain('og/pt-grants.png');
+    expect(html).toContain('lang="pt"');
+  });
+
+  it('uses a Portuguese OG image for /pt/blog/:slug', async () => {
+    const { response } = await makeRequest(
+      '/pt/blog/wave-7-kickoff',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+    expect(html).toContain(
+      'og:image" content="https://usewraith.xyz/og/pt-blog-wave-7-kickoff.png"',
+    );
+    expect(html).toContain('og:locale" content="pt_BR"');
   });
 
   it('uses English OG image for /grants (no locale prefix)', async () => {
