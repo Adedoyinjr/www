@@ -325,6 +325,137 @@
     "ogTitle": "Wraith Protocol",
     "ogDescription": "Private payments for every chain. Stealth addresses, multichain SDK, and AI-powered privacy agents."
   },
+  "ogRoutes": {
+    "/": {
+      "title": "Wraith Protocol",
+      "description": "Private payments for every chain. Stealth addresses, multichain SDK, and AI-powered privacy agents.",
+      "ogImage": {
+        "title": "Wraith Protocol",
+        "subtitle": "Private payments for every chain",
+        "chainBadge": "EVM · Stellar"
+      },
+      "ogType": "website"
+    },
+    "/blog": {
+      "title": "Blog — Wraith Protocol",
+      "description": "Updates, guides, and deep dives from the Wraith team.",
+      "ogImage": {
+        "title": "Blog",
+        "subtitle": "Updates, guides, and deep dives from the Wraith team"
+      },
+      "ogType": "website"
+    },
+    "/case-studies": {
+      "title": "Case Studies — Wraith Protocol",
+      "description": "Real-world privacy solutions built on Wraith Protocol. From payroll processors to DAOs.",
+      "ogImage": {
+        "title": "Case Studies",
+        "subtitle": "Real-world privacy solutions built on Wraith Protocol"
+      },
+      "ogType": "website"
+    },
+    "/careers": {
+      "title": "Careers — Wraith Protocol",
+      "description": "Open-source bounties and paid contract work at Wraith Protocol.",
+      "ogImage": {
+        "title": "Careers",
+        "subtitle": "Open-source bounties and paid contract work"
+      },
+      "ogType": "website"
+    },
+    "/contributors": {
+      "title": "Contributors — Wraith Protocol",
+      "description": "The people building and improving Wraith Protocol.",
+      "ogImage": {
+        "title": "Contributors",
+        "subtitle": "The people building and improving Wraith Protocol"
+      },
+      "ogType": "website"
+    },
+    "/faq": {
+      "title": "FAQ — Wraith Protocol",
+      "description": "Frequently asked questions about Wraith Protocol and stealth addresses.",
+      "ogImage": {
+        "title": "FAQ",
+        "subtitle": "Frequently asked questions about Wraith Protocol"
+      },
+      "ogType": "website"
+    },
+    "/grants": {
+      "title": "Grants — Wraith Protocol",
+      "description": "Wraith Protocol runs a grant program for privacy infrastructure. Build private payments and get funded.",
+      "ogImage": {
+        "title": "Grants",
+        "subtitle": "Build private payments. Get funded.",
+        "chainBadge": "Stellar · EVM"
+      },
+      "ogType": "website"
+    },
+    "/about": {
+      "title": "About — Wraith Protocol",
+      "description": "Building privacy-preserving payment infrastructure for everyone.",
+      "ogImage": {
+        "title": "About",
+        "subtitle": "Building privacy-preserving payment infrastructure for everyone"
+      },
+      "ogType": "website"
+    },
+    "/newsletter": {
+      "title": "Newsletter — Wraith Protocol",
+      "description": "Mainnet updates, security advisories, and grant news — no tracking.",
+      "ogImage": {
+        "title": "Newsletter",
+        "subtitle": "Mainnet updates, security advisories, and grant news"
+      },
+      "ogType": "website"
+    },
+    "/privacy": {
+      "title": "Privacy Policy — Wraith Protocol",
+      "description": "How we handle your data — spoiler: we don't collect any.",
+      "ogImage": {
+        "title": "Privacy Policy",
+        "subtitle": "How we handle your data — spoiler: we don't collect any"
+      },
+      "ogType": "website"
+    },
+    "/roadmap": {
+      "title": "Roadmap — Wraith Protocol",
+      "description": "The future of Wraith Protocol — a public roadmap of upcoming features.",
+      "ogImage": {
+        "title": "Roadmap",
+        "subtitle": "The future of Wraith"
+      },
+      "ogType": "website"
+    },
+    "/stellar": {
+      "title": "Stellar Integration — Wraith Protocol",
+      "description": "Native stealth address support on the Stellar network with memo-based metadata.",
+      "ogImage": {
+        "title": "Stellar Integration",
+        "subtitle": "Native stealth addresses on the Stellar network",
+        "chainBadge": "Stellar"
+      },
+      "ogType": "website"
+    },
+    "/use-cases": {
+      "title": "Use Cases — Wraith Protocol",
+      "description": "Who uses Wraith Protocol and why — from payroll to DAOs.",
+      "ogImage": {
+        "title": "Use Cases",
+        "subtitle": "Who uses Wraith Protocol and why"
+      },
+      "ogType": "website"
+    },
+    "/vitals": {
+      "title": "Web Vitals Dashboard — Wraith Protocol",
+      "description": "Real-user performance telemetry for usewraith.xyz.",
+      "ogImage": {
+        "title": "Web Vitals",
+        "subtitle": "Real-user performance telemetry for usewraith.xyz"
+      },
+      "ogType": "website"
+    }
+  },
   "caseStudies": {
     "eyebrow": "CASE STUDIES",
     "heading": "Real-world privacy solutions.",

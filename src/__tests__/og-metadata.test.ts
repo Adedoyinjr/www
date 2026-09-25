@@ -6,6 +6,7 @@ import {
   generateOgImageUrl,
   stripLocalePrefix,
   localeStrings,
+  listOgImageJobs,
   SITE_URL,
   CACHE_CONTROL,
   SUPPORTED_LOCALES,
@@ -167,6 +168,95 @@ describe('og-metadata: localization', () => {
     expect(meta!.title).toBe('Subvenciones — Wraith Protocol');
   });
 
+  it('resolves Portuguese locale from /pt prefix', () => {
+    const meta = resolveRouteMetadata('/pt/blog/wave-7-kickoff');
+    expect(meta).not.toBeNull();
+    expect(meta!.locale).toBe('pt');
+  });
+
+  it('resolves Portuguese locale for /pt/stellar', () => {
+    const meta = resolveRouteMetadata('/pt/stellar');
+    expect(meta).not.toBeNull();
+    expect(meta!.locale).toBe('pt');
+    expect(meta!.title).toBe('Integração Stellar — Wraith Protocol');
+  });
+
+  it('resolves Portuguese locale for /pt/grants', () => {
+    const meta = resolveRouteMetadata('/pt/grants');
+    expect(meta).not.toBeNull();
+    expect(meta!.locale).toBe('pt');
+    expect(meta!.title).toBe('Bolsas — Wraith Protocol');
+  });
+
+  it('resolves Portuguese home route', () => {
+    const meta = resolveRouteMetadata('/pt');
+    expect(meta).not.toBeNull();
+    expect(meta!.locale).toBe('pt');
+    expect(meta!.ogUrl).toBe('https://usewraith.xyz/pt');
+  });
+
+  it('returns a Spanish description for Spanish routes', () => {
+    const meta = resolveRouteMetadata('/es/grants');
+    expect(meta).not.toBeNull();
+    expect(meta!.description).toBe(
+      'Wraith Protocol mantiene un programa de subvenciones para infraestructura de privacidad. Construye pagos privados y obtén financiación.',
+    );
+    expect(meta!.ogDescription).toBe(meta!.description);
+  });
+
+  it('returns a Spanish home description that differs from English', () => {
+    const es = resolveRouteMetadata('/es');
+    const en = resolveRouteMetadata('/');
+    expect(es).not.toBeNull();
+    expect(en).not.toBeNull();
+    expect(es!.description).not.toBe(en!.description);
+    expect(es!.description).toBe(
+      'Pagos privados para cada cadena. Direcciones ocultas, SDK multicadena y agentes de privacidad con IA.',
+    );
+  });
+
+  it('returns a Portuguese home description that differs from English', () => {
+    const pt = resolveRouteMetadata('/pt');
+    const en = resolveRouteMetadata('/');
+    expect(pt).not.toBeNull();
+    expect(en).not.toBeNull();
+    expect(pt!.description).not.toBe(en!.description);
+    expect(pt!.description).toBe(
+      'Pagamentos privados para cada rede. Endereços ocultos, SDK multi-rede e agentes de privacidade com IA.',
+    );
+  });
+
+  it('localizes the OG image copy, not only the title', () => {
+    const es = resolveRouteMetadata('/es/stellar');
+    const pt = resolveRouteMetadata('/pt/stellar');
+    const en = resolveRouteMetadata('/stellar');
+    expect(es!.ogImage.title).toBe('Integración Stellar');
+    expect(es!.ogImage.subtitle).not.toBe(en!.ogImage.subtitle);
+    expect(pt!.ogImage.title).toBe('Integração Stellar');
+    expect(pt!.ogImage.subtitle).not.toBe(en!.ogImage.subtitle);
+    expect(pt!.ogImage.chainBadge).toBe('Stellar');
+  });
+
+  it('preserves the locale in ogUrl', () => {
+    expect(resolveRouteMetadata('/es/grants')!.ogUrl).toBe('https://usewraith.xyz/es/grants');
+    expect(resolveRouteMetadata('/pt/grants')!.ogUrl).toBe('https://usewraith.xyz/pt/grants');
+    expect(resolveRouteMetadata('/es/blog/wave-7-kickoff')!.ogUrl).toBe(
+      'https://usewraith.xyz/es/blog/wave-7-kickoff',
+    );
+    expect(resolveRouteMetadata('/pt/blog/wave-7-kickoff')!.ogUrl).toBe(
+      'https://usewraith.xyz/pt/blog/wave-7-kickoff',
+    );
+    expect(resolveRouteMetadata('/es/case-studies/payroll-processor')!.ogUrl).toBe(
+      'https://usewraith.xyz/es/case-studies/payroll-processor',
+    );
+  });
+
+  it('keeps English ogUrl unprefixed', () => {
+    expect(resolveRouteMetadata('/')!.ogUrl).toBe('https://usewraith.xyz');
+    expect(resolveRouteMetadata('/grants')!.ogUrl).toBe('https://usewraith.xyz/grants');
+    expect(resolveRouteMetadata('/en/grants')!.ogUrl).toBe('https://usewraith.xyz/grants');
+  });
+
   it('resolves English locale for /en/ prefix', () => {
     const meta = resolveRouteMetadata('/en/blog/wave-7-kickoff');
     expect(meta).not.toBeNull();
@@ -192,6 +282,14 @@ describe('og-metadata: localization', () => {
       pathname: '/',
       locale: 'es',
     });
+    expect(stripLocalePrefix('/pt/grants')).toEqual({
+      pathname: '/grants',
+      locale: 'pt',
+    });
+    expect(stripLocalePrefix('/pt')).toEqual({
+      pathname: '/',
+      locale: 'pt',
+    });
     expect(stripLocalePrefix('/blog/test')).toEqual({
       pathname: '/blog/test',
       locale: 'en',
@@ -210,8 +308,14 @@ describe('og-metadata: localization', () => {
     expect(strings.siteTitle).toBe('Wraith Protocol — Private payments for every chain');
   });
 
-  it('supports only en and es locales', () => {
-    expect(SUPPORTED_LOCALES).toEqual(['en', 'es']);
+  it('returns Portuguese locale strings', () => {
+    const strings = localeStrings('pt');
+    expect(strings.ogTitle).toBe('Wraith Protocol');
+    expect(strings.siteTitle).toBe('Wraith Protocol — Pagamentos privados para cada rede');
+  });
+
+  it('supports en, es and pt locales', () => {
+    expect(SUPPORTED_LOCALES).toEqual(['en', 'es', 'pt']);
   });
 });
 
@@ -278,6 +382,58 @@ describe('og-metadata: OG image URLs', () => {
     expect(ogImageSlugFor('/blog/wave-7-kickoff', 'en')).not.toBe(
       ogImageSlugFor('/es/blog/wave-7-kickoff', 'es'),
     );
+    expect(ogImageSlugFor('/grants', 'en')).not.toBe(ogImageSlugFor('/pt/grants', 'pt'));
+  });
+
+  it('prefixes slug with locale for Portuguese routes', () => {
+    expect(ogImageSlugFor('/pt', 'pt')).toBe('pt-home');
+    expect(ogImageSlugFor('/pt/grants', 'pt')).toBe('pt-grants');
+    expect(ogImageSlugFor('/pt/stellar', 'pt')).toBe('pt-stellar');
+    expect(ogImageSlugFor('/pt/blog', 'pt')).toBe('pt-blog');
+    expect(ogImageSlugFor('/pt/blog/wave-7-kickoff', 'pt')).toBe('pt-blog-wave-7-kickoff');
+    expect(ogImageSlugFor('/pt/case-studies/payroll-processor', 'pt')).toBe(
+      'pt-case-study-payroll-processor',
+    );
+  });
+
+  it('returns null for non-indexable Portuguese routes', () => {
+    expect(ogImageSlugFor('/pt/nonexistent', 'pt')).toBeNull();
+    expect(ogImageSlugFor('/pt/admin', 'pt')).toBeNull();
+  });
+
+  it('generates one localized image per route and locale', () => {
+    const jobs = listOgImageJobs();
+    const files = jobs.map((job) => job.file);
+    expect(new Set(files).size).toBe(files.length);
+
+    for (const locale of SUPPORTED_LOCALES) {
+      expect(files).toContain(locale === 'en' ? 'grants.png' : `${locale}-grants.png`);
+      expect(files).toContain(locale === 'en' ? 'home.png' : `${locale}-home.png`);
+    }
+  });
+
+  it('renders localized copy into the generated image jobs', () => {
+    const jobs = listOgImageJobs();
+    const grants = (locale: 'en' | 'es' | 'pt') =>
+      jobs.find((job) => job.routePath === '/grants' && job.locale === locale)!;
+
+    expect(grants('en').title).toBe('Grants');
+    expect(grants('es').title).toBe('Subvenciones');
+    expect(grants('pt').title).toBe('Bolsas');
+    expect(grants('es').subtitle).not.toBe(grants('en').subtitle);
+    expect(grants('pt').subtitle).not.toBe(grants('en').subtitle);
+    expect(grants('pt').description).not.toBe(grants('en').description);
+  });
+
+  it('keeps one file per locale for every route', () => {
+    const jobs = listOgImageJobs();
+    const routePaths = new Set(jobs.map((job) => job.routePath));
+    for (const routePath of routePaths) {
+      const locales = new Set(
+        jobs.filter((job) => job.routePath === routePath).map((j) => j.locale),
+      );
+      expect([...locales].sort()).toEqual([...SUPPORTED_LOCALES].sort());
+    }
   });
 
   it('generates OG image URL with proper encoding', () => {
@@ -306,6 +462,17 @@ describe('og-metadata: OG image URLs', () => {
   it('appends lang parameter for Spanish locale', () => {
     const url = generateOgImageUrl({ title: 'Test', subtitle: 'desc' }, 'es');
     expect(url).toContain('lang=es');
+  });
+
+  it('appends lang parameter for Portuguese locale', () => {
+    const url = generateOgImageUrl({ title: 'Teste', subtitle: 'descrição' }, 'pt');
+    expect(url).toContain('lang=pt');
+    expect(decodeURIComponent(url)).toContain('descrição');
+  });
+
+  it('omits lang parameter for English locale', () => {
+    const url = generateOgImageUrl({ title: 'Test', subtitle: 'desc' }, 'en');
+    expect(url).not.toContain('lang=');
   });
 
   it('appends badge parameter when chainBadge is present', () => {
