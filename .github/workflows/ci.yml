@@ -19,6 +19,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint:i18n
+      - run: pnpm test:repo
       - run: pnpm test:a11y
       - run: pnpm build
       - run: pnpm validate:jsonld
@@ -42,6 +43,17 @@ jobs:
 
       - name: Run Playwright a11y tests
         run: pnpm test:a11y:playwright
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   lighthouse:
     name: Lighthouse Audit

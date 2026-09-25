@@ -15,3 +15,9 @@ tsconfig.tsbuildinfo
 # npm lockfile: this repo standardises on pnpm (see packageManager in package.json).
 # A second lockfile makes Vercel's package-manager autodetection ambiguous.
 package-lock.json
+
+# Playwright generated output — uploaded as a CI artifact, never committed.
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
