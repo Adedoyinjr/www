@@ -454,6 +454,69 @@
         "subtitle": "Telemetría de rendimiento real de usuarios"
       },
       "ogType": "website"
+    },
+    "/chains": {
+      "title": "Matriz comparativa de cadenas — Wraith Protocol",
+      "description": "Compara tiempos de bloque, comisiones, finalidad, soporte de wallets y estado de integración en las cadenas soportadas por Wraith Protocol.",
+      "ogImage": {
+        "title": "Matriz comparativa de cadenas",
+        "subtitle": "Tiempos de bloque, comisiones, finalidad, wallets"
+      },
+      "ogType": "website"
+    },
+    "/ecosystem": {
+      "title": "Ecosistema y partners — Wraith Protocol",
+      "description": "Explora el ecosistema de Wraith Protocol: wallets, DEX, protocolos de lending, indexers y oráculos integrados con tecnología de direcciones stealth.",
+      "ogImage": {
+        "title": "Ecosistema y partners",
+        "subtitle": "Wallets, DEX, lending, indexers, oráculos"
+      },
+      "ogType": "website"
+    },
+    "/security": {
+      "title": "Compromisos de seguridad — Wraith Protocol",
+      "description": "Postura de seguridad de Wraith Protocol: modelo de amenazas, política de divulgación coordinada, auditorías y programa de recompensas.",
+      "ogImage": {
+        "title": "Compromisos de seguridad",
+        "subtitle": "Amenazas, auditorías, divulgación, recompensas"
+      },
+      "ogType": "website"
+    },
+    "/status": {
+      "title": "Estado del sistema — Wraith Protocol",
+      "description": "Disponibilidad en vivo e historial de incidentes de la API, el SDK y las cadenas soportadas de Wraith Protocol.",
+      "ogImage": {
+        "title": "Estado del sistema",
+        "subtitle": "Disponibilidad e historial de incidentes"
+      },
+      "ogType": "website"
+    },
+    "/governance": {
+      "title": "Gobernanza — Wraith Protocol",
+      "description": "Cómo se gobierna Wraith Protocol: propuestas, derechos de decisión y cómo cambia la hoja de ruta.",
+      "ogImage": {
+        "title": "Gobernanza",
+        "subtitle": "Propuestas, decisiones, hoja de ruta"
+      },
+      "ogType": "website"
+    },
+    "/threat-model": {
+      "title": "Modelo de amenazas — Wraith Protocol",
+      "description": "Qué pueden y qué no pueden aprender un observador on-chain, un observador de red, un RPC comprometido, una contraparte maliciosa o un indexer citado en flujos de texto plano, firmas de anillo, mixer y Wraith.",
+      "ogImage": {
+        "title": "Modelo de amenazas",
+        "subtitle": "Qué puede aprender cada observador"
+      },
+      "ogType": "website"
+    },
+    "/use-cases/calculator": {
+      "title": "Calculadora de costes de pago — Wraith Protocol",
+      "description": "Estima las comisiones de red y el sobrecosto modelado de los pagos stealth mensuales en las cadenas soportadas por Wraith.",
+      "ogImage": {
+        "title": "Calculadora de costes",
+        "subtitle": "Estima las comisiones de pagos stealth"
+      },
+      "ogType": "website"
     }
   },
   "caseStudies": {

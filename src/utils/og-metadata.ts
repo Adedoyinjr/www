@@ -64,15 +64,22 @@ const ROUTE_SLUGS: Record<string, string> = {
   '/blog': 'blog',
   '/case-studies': 'case-studies',
   '/careers': 'careers',
+  '/chains': 'chains',
   '/contributors': 'contributors',
+  '/ecosystem': 'ecosystem',
   '/faq': 'faq',
+  '/governance': 'governance',
   '/grants': 'grants',
   '/about': 'about',
   '/newsletter': 'newsletter',
   '/privacy': 'privacy',
   '/roadmap': 'roadmap',
+  '/security': 'security',
+  '/status': 'status',
   '/stellar': 'stellar',
+  '/threat-model': 'threat-model',
   '/use-cases': 'use-cases',
+  '/use-cases/calculator': 'use-cases-calculator',
   '/vitals': 'vitals',
 };
 
@@ -97,6 +104,10 @@ const caseStudyEntries = ((caseStudiesData as { entries?: unknown[] }).entries |
   org: string;
   summary: string;
 }>;
+
+function hasStaticRouteConfig(routePath: string): boolean {
+  return Object.prototype.hasOwnProperty.call(ROUTE_CONTENT.en, routePath);
+}
 
 function getStaticRouteConfig(routePath: string, locale: Locale): StaticRouteContent | null {
   const localized = ROUTE_CONTENT[locale]?.[routePath];
@@ -133,11 +144,31 @@ function localePrefixedSlug(locale: Locale, slug: string): string {
   return locale === 'en' ? slug : `${locale}-${slug}`;
 }
 
+function isKnownBlogSlug(slug: string): boolean {
+  return blogManifestData.some((post) => post.slug === slug);
+}
+
+function isKnownCaseStudySlug(slug: string): boolean {
+  return caseStudyEntries.some((entry) => entry.slug === slug);
+}
+
+function blogSlugFrom(pathname: string): string | null {
+  return pathname.match(/^\/blog\/(.+)$/)?.[1] ?? null;
+}
+
+function caseStudySlugFrom(pathname: string): string | null {
+  return pathname.match(/^\/case-studies\/(.+)$/)?.[1] ?? null;
+}
+
 export function resolveRouteMetadata(pathname: string): RouteMetadata | null {
   const { pathname: cleanPath, locale } = stripLocalePrefix(pathname);
-  const routeBase = cleanPath.split('/').slice(0, 2).join('/') || '/';
-  const isDynamicBlog = cleanPath.match(/^\/blog\/(.+)$/);
-  const isDynamicCaseStudy = cleanPath.match(/^\/case-studies\/(.+)$/);
+  const blogSlug = blogSlugFrom(cleanPath);
+  const caseStudySlug = caseStudySlugFrom(cleanPath);
+  // Exact match first, then the two-segment base (`/use-cases/calculator` is a
+  // route of its own and must not fall back to the `/use-cases` card).
+  const staticRoutePath = hasStaticRouteConfig(cleanPath)
+    ? cleanPath
+    : cleanPath.split('/').slice(0, 2).join('/') || '/';
 
   let title: string;
   let description: string;
@@ -153,48 +184,31 @@ export function resolveRouteMetadata(pathname: string): RouteMetadata | null {
     ogImage = config.ogImage;
     ogType = config.ogType;
     ogUrl = canonicalUrlFor(locale, '/');
-  } else if (isDynamicBlog) {
-    const slug = isDynamicBlog[1];
-    const post = blogManifestData.find((p) => p.slug === slug);
-    if (post) {
-      title = `${post.title} — Wraith Protocol`;
-      description = post.excerpt;
-      ogImage = { title: post.title, subtitle: post.excerpt };
-      ogType = 'article';
-    } else {
-      const config = getStaticRouteConfig('/blog', locale);
-      if (!config) return null;
-      title = config.title;
-      description = config.description;
-      ogImage = config.ogImage;
-      ogType = 'article';
-    }
-    ogUrl = canonicalUrlFor(locale, `/blog/${slug}`);
-  } else if (isDynamicCaseStudy) {
-    const slug = isDynamicCaseStudy[1];
-    const study = caseStudyEntries.find((e) => e.slug === slug);
-    if (study) {
-      title = `${study.org} — Wraith Protocol`;
-      description = study.summary || 'Built with Wraith stealth addresses.';
-      ogImage = { title: study.org, subtitle: study.summary || 'Case study' };
-      ogType = 'article';
-    } else {
-      const config = getStaticRouteConfig('/case-studies', locale);
-      if (!config) return null;
-      title = config.title;
-      description = config.description;
-      ogImage = config.ogImage;
-      ogType = 'article';
-    }
-    ogUrl = canonicalUrlFor(locale, `/case-studies/${slug}`);
+  } else if (blogSlug) {
+    // Unknown slugs 404 in the app, so they must not be served metadata.
+    const post = blogManifestData.find((p) => p.slug === blogSlug);
+    if (!post) return null;
+    title = `${post.title} — Wraith Protocol`;
+    description = post.excerpt;
+    ogImage = { title: post.title, subtitle: post.excerpt };
+    ogType = 'article';
+    ogUrl = canonicalUrlFor(locale, `/blog/${blogSlug}`);
+  } else if (caseStudySlug) {
+    const study = caseStudyEntries.find((e) => e.slug === caseStudySlug);
+    if (!study) return null;
+    title = `${study.org} — Wraith Protocol`;
+    description = study.summary || 'Built with Wraith stealth addresses.';
+    ogImage = { title: study.org, subtitle: study.summary || 'Case study' };
+    ogType = 'article';
+    ogUrl = canonicalUrlFor(locale, `/case-studies/${caseStudySlug}`);
   } else {
-    const config = getStaticRouteConfig(routeBase, locale);
+    const config = getStaticRouteConfig(staticRoutePath, locale);
     if (!config) return null;
     title = config.title;
     description = config.description;
     ogImage = config.ogImage;
     ogType = config.ogType;
-    ogUrl = canonicalUrlFor(locale, routeBase === '' ? '/' : routeBase);
+    ogUrl = canonicalUrlFor(locale, staticRoutePath === '' ? '/' : staticRoutePath);
   }
 
   return {
@@ -216,12 +230,17 @@ export function isIndexableRoute(pathname: string): boolean {
     return true;
   }
 
-  if (cleanPath.match(/^\/blog\/(.+)$/)) {
-    return true;
+  // Dynamic slugs are only indexable when the post or case study exists —
+  // everything else 404s in the app (this also rejects `/blog/tag/*` and
+  // `/blog/author/*`, which are not posts).
+  const blogSlug = blogSlugFrom(cleanPath);
+  if (blogSlug) {
+    return isKnownBlogSlug(blogSlug);
   }
 
-  if (cleanPath.match(/^\/case-studies\/(.+)$/)) {
-    return true;
+  const caseStudySlug = caseStudySlugFrom(cleanPath);
+  if (caseStudySlug) {
+    return isKnownCaseStudySlug(caseStudySlug);
   }
 
   return false;
@@ -234,14 +253,14 @@ export function ogImageSlugFor(pathname: string, locale: Locale): string | null 
     return null;
   }
 
-  const isDynamicBlog = cleanPath.match(/^\/blog\/(.+)$/);
-  if (isDynamicBlog) {
-    return localePrefixedSlug(locale, `blog-${isDynamicBlog[1]}`);
+  const blogSlug = blogSlugFrom(cleanPath);
+  if (blogSlug) {
+    return localePrefixedSlug(locale, `blog-${blogSlug}`);
   }
 
-  const isDynamicCaseStudy = cleanPath.match(/^\/case-studies\/(.+)$/);
-  if (isDynamicCaseStudy) {
-    return localePrefixedSlug(locale, `case-study-${isDynamicCaseStudy[1]}`);
+  const caseStudySlug = caseStudySlugFrom(cleanPath);
+  if (caseStudySlug) {
+    return localePrefixedSlug(locale, `case-study-${caseStudySlug}`);
   }
 
   const slug = ROUTE_SLUGS[cleanPath];

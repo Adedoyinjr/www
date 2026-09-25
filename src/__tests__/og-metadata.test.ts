@@ -105,6 +105,31 @@ describe('og-metadata: static routes', () => {
     expect(meta).not.toBeNull();
     expect(meta!.title).toBe('Web Vitals Dashboard — Wraith Protocol');
   });
+
+  it('resolves the remaining indexable static routes', () => {
+    const expected: Array<[string, string]> = [
+      ['/chains', 'Chain Comparison Matrix — Wraith Protocol'],
+      ['/ecosystem', 'Ecosystem & Partners — Wraith Protocol'],
+      ['/security', 'Security Commitments — Wraith Protocol'],
+      ['/status', 'System Status — Wraith Protocol'],
+      ['/governance', 'Governance — Wraith Protocol'],
+      ['/threat-model', 'Threat Model — Wraith Protocol'],
+      ['/use-cases/calculator', 'Payment Cost Calculator — Wraith Protocol'],
+    ];
+
+    for (const [route, title] of expected) {
+      const meta = resolveRouteMetadata(route);
+      expect(meta, `${route} must resolve`).not.toBeNull();
+      expect(meta!.title).toBe(title);
+      expect(meta!.ogUrl).toBe(`https://usewraith.xyz${route}`);
+    }
+  });
+
+  it('keeps /use-cases/calculator separate from its parent route', () => {
+    expect(resolveRouteMetadata('/use-cases/calculator')!.title).not.toBe(
+      resolveRouteMetadata('/use-cases')!.title,
+    );
+  });
 });
 
 describe('og-metadata: dynamic routes', () => {
@@ -123,12 +148,9 @@ describe('og-metadata: dynamic routes', () => {
     expect(meta!.ogType).toBe('article');
   });
 
-  it('falls back to generic metadata for unknown blog slug', () => {
-    const meta = resolveRouteMetadata('/blog/nonexistent-post');
-    expect(meta).not.toBeNull();
-    expect(meta!.ogType).toBe('article');
-    expect(meta!.ogUrl).toBe('https://usewraith.xyz/blog/nonexistent-post');
-    expect(meta!.title).toBe('Blog — Wraith Protocol');
+  it('returns no metadata for an unknown blog slug', () => {
+    expect(resolveRouteMetadata('/blog/nonexistent-post')).toBeNull();
+    expect(resolveRouteMetadata('/es/blog/nonexistent-post')).toBeNull();
   });
 
   it('resolves a known case study by slug', () => {
@@ -139,11 +161,14 @@ describe('og-metadata: dynamic routes', () => {
     expect(meta!.ogUrl).toBe('https://usewraith.xyz/case-studies/payroll-processor');
   });
 
-  it('falls back to generic metadata for unknown case study slug', () => {
-    const meta = resolveRouteMetadata('/case-studies/nonexistent');
-    expect(meta).not.toBeNull();
-    expect(meta!.ogType).toBe('article');
-    expect(meta!.ogUrl).toBe('https://usewraith.xyz/case-studies/nonexistent');
+  it('returns no metadata for an unknown case study slug', () => {
+    expect(resolveRouteMetadata('/case-studies/nonexistent')).toBeNull();
+    expect(resolveRouteMetadata('/pt/case-studies/nonexistent')).toBeNull();
+  });
+
+  it('does not treat blog tag or author routes as posts', () => {
+    expect(resolveRouteMetadata('/blog/tag/wave-7')).toBeNull();
+    expect(resolveRouteMetadata('/blog/author/lena-vogt')).toBeNull();
   });
 });
 
@@ -485,14 +510,51 @@ describe('og-metadata: OG image URLs', () => {
 });
 
 describe('og-metadata: route indexability', () => {
-  it('identifies indexable routes', () => {
-    expect(isIndexableRoute('/')).toBe(true);
-    expect(isIndexableRoute('/blog')).toBe(true);
+  const INDEXABLE_STATIC_ROUTES = [
+    '/',
+    '/blog',
+    '/case-studies',
+    '/careers',
+    '/chains',
+    '/contributors',
+    '/ecosystem',
+    '/faq',
+    '/governance',
+    '/grants',
+    '/about',
+    '/newsletter',
+    '/privacy',
+    '/roadmap',
+    '/security',
+    '/status',
+    '/stellar',
+    '/threat-model',
+    '/use-cases',
+    '/use-cases/calculator',
+    '/vitals',
+  ];
+
+  it('treats every static route in the router as indexable', () => {
+    for (const route of INDEXABLE_STATIC_ROUTES) {
+      expect(isIndexableRoute(route), `${route} must be indexable`).toBe(true);
+    }
+  });
+
+  it('identifies indexable dynamic routes', () => {
     expect(isIndexableRoute('/blog/wave-7-kickoff')).toBe(true);
     expect(isIndexableRoute('/case-studies/payroll-processor')).toBe(true);
-    expect(isIndexableRoute('/stellar')).toBe(true);
-    expect(isIndexableRoute('/roadmap')).toBe(true);
-    expect(isIndexableRoute('/use-cases')).toBe(true);
+  });
+
+  it('rejects unknown blog and case study slugs', () => {
+    expect(isIndexableRoute('/blog/nonexistent-post')).toBe(false);
+    expect(isIndexableRoute('/case-studies/nonexistent')).toBe(false);
+    expect(isIndexableRoute('/es/blog/nonexistent-post')).toBe(false);
+    expect(isIndexableRoute('/pt/case-studies/nonexistent')).toBe(false);
+  });
+
+  it('rejects blog tag and author routes', () => {
+    expect(isIndexableRoute('/blog/tag/wave-7')).toBe(false);
+    expect(isIndexableRoute('/blog/author/lena-vogt')).toBe(false);
   });
 
   it('identifies non-indexable routes', () => {
@@ -505,11 +567,21 @@ describe('og-metadata: route indexability', () => {
     expect(isIndexableRoute('/es/blog')).toBe(true);
     expect(isIndexableRoute('/es/stellar')).toBe(true);
     expect(isIndexableRoute('/en/case-studies/payroll-processor')).toBe(true);
+    expect(isIndexableRoute('/es/use-cases/calculator')).toBe(true);
+    expect(isIndexableRoute('/pt/threat-model')).toBe(true);
   });
 
   it('identifies localized non-indexable routes', () => {
     expect(isIndexableRoute('/es/nonexistent')).toBe(false);
     expect(isIndexableRoute('/en/admin')).toBe(false);
+  });
+
+  it('maps every indexable static route to an OG image slug', () => {
+    for (const route of INDEXABLE_STATIC_ROUTES) {
+      const slug = ogImageSlugFor(route, 'en');
+      expect(slug, `${route} needs a static OG image`).toBeTruthy();
+      expect(slug).toMatch(/^[a-z0-9-]+$/);
+    }
   });
 });
 

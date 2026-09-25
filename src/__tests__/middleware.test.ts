@@ -103,6 +103,75 @@ describe('middleware: non-indexable routes', () => {
     );
     expect(response).toBeUndefined();
   });
+
+  it('bypasses bot requests for unknown blog slugs', async () => {
+    for (const path of ['/blog/nonexistent-post', '/es/blog/nonexistent-post']) {
+      const { response } = await makeRequest(
+        path,
+        'TwitterBot/1.0',
+        '<html lang="en"><head></head></html>',
+      );
+      expect(response, `${path} must not be rewritten`).toBeUndefined();
+    }
+  });
+
+  it('bypasses bot requests for unknown case study slugs', async () => {
+    const { response } = await makeRequest(
+      '/case-studies/nonexistent',
+      'TwitterBot/1.0',
+      '<html lang="en"><head></head></html>',
+    );
+    expect(response).toBeUndefined();
+  });
+
+  it('bypasses bot requests for blog tag and author routes', async () => {
+    for (const path of ['/blog/tag/wave-7', '/blog/author/lena-vogt']) {
+      const { response } = await makeRequest(
+        path,
+        'TwitterBot/1.0',
+        '<html lang="en"><head></head></html>',
+      );
+      expect(response, `${path} must not be rewritten`).toBeUndefined();
+    }
+  });
+});
+
+describe('middleware: newly covered routes', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['/chains', 'Chain Comparison Matrix', 'og/chains.png'],
+    ['/ecosystem', 'Ecosystem &amp; Partners', 'og/ecosystem.png'],
+    ['/security', 'Security Commitments', 'og/security.png'],
+    ['/status', 'System Status', 'og/status.png'],
+    ['/governance', 'Governance', 'og/governance.png'],
+    ['/threat-model', 'Threat Model', 'og/threat-model.png'],
+    ['/use-cases/calculator', 'Payment Cost Calculator', 'og/use-cases-calculator.png'],
+  ])('injects metadata for %s', async (path, expectedTitle, expectedImage) => {
+    const { response } = await makeRequest(
+      path,
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain(`<title>${expectedTitle}`);
+    expect(html).toContain(expectedImage);
+    expect(html).toContain('https://usewraith.xyz' + path);
+  });
+
+  it('injects localized metadata and localized images', async () => {
+    const { response } = await makeRequest(
+      '/es/chains',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain('og/es-chains.png');
+    expect(html).toContain('og:locale" content="es_ES');
+    expect(html).toContain('https://usewraith.xyz/es/chains');
+  });
 });
 
 describe('middleware: meta tag injection', () => {
