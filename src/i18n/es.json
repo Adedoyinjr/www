@@ -519,6 +519,40 @@
       "ogType": "website"
     }
   },
+  "ogContent": {
+    "/blog/wave-7-kickoff": {
+      "title": "Inicio de la ola 7 + lo que lanzamos en la ola 6",
+      "description": "Anunciamos el inicio de la ola 7 junto con un resumen de los hitos de la ola 6: transacciones stealth en EVM, lanzamiento del SDK v1.4, integraciones del ecosistema Stellar y mejoras de privacidad en TEE.",
+      "ogImage": {
+        "title": "Inicio de la ola 7",
+        "subtitle": "Transacciones stealth, SDK v1.4, Stellar y TEE"
+      }
+    },
+    "/blog/stealth-addresses-explained": {
+      "title": "Direcciones stealth explicadas",
+      "description": "Una introducción clara a las direcciones stealth y por qué importan.",
+      "ogImage": {
+        "title": "Direcciones stealth explicadas",
+        "subtitle": "Qué son y por qué importan"
+      }
+    },
+    "/blog/privacy-by-default": {
+      "title": "Privacidad por defecto",
+      "description": "Cómo hace Wraith que los pagos privados sean prácticos en el día a día de las aplicaciones.",
+      "ogImage": {
+        "title": "Privacidad por defecto",
+        "subtitle": "Pagos privados en el día a día"
+      }
+    },
+    "/case-studies/payroll-processor": {
+      "title": "Proveedor de nómina anónimo",
+      "description": "Una plataforma de procesamiento de nóminas que usa Wraith para habilitar pagos privados a contratistas, protegiendo la privacidad financiera de los receptores en distintas jurisdicciones.",
+      "ogImage": {
+        "title": "Proveedor de nómina anónimo",
+        "subtitle": "Pagos privados a contratistas"
+      }
+    }
+  },
   "caseStudies": {
     "eyebrow": "CASOS DE ESTUDIO",
     "heading": "Soluciones de privacidad en el mundo real.",

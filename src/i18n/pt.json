@@ -519,6 +519,40 @@
       "ogType": "website"
     }
   },
+  "ogContent": {
+    "/blog/wave-7-kickoff": {
+      "title": "Início da onda 7 + o que entregamos na onda 6",
+      "description": "Anunciamos o início da onda 7 com um resumo das entregas da onda 6: transações stealth em EVM, lançamento do SDK v1.4, integrações do ecossistema Stellar e melhorias de privacidade em TEE.",
+      "ogImage": {
+        "title": "Início da onda 7",
+        "subtitle": "Transações stealth, SDK v1.4, Stellar e TEE"
+      }
+    },
+    "/blog/stealth-addresses-explained": {
+      "title": "Endereços stealth explicados",
+      "description": "Uma introdução direta aos endereços stealth e por que eles importam.",
+      "ogImage": {
+        "title": "Endereços stealth explicados",
+        "subtitle": "O que são e por que importam"
+      }
+    },
+    "/blog/privacy-by-default": {
+      "title": "Privacidade por padrão",
+      "description": "Como o Wraith torna pagamentos privados práticos para aplicativos do dia a dia.",
+      "ogImage": {
+        "title": "Privacidade por padrão",
+        "subtitle": "Pagamentos privados no dia a dia"
+      }
+    },
+    "/case-studies/payroll-processor": {
+      "title": "Provedor de folha de pagamento anônimo",
+      "description": "Uma plataforma de processamento de folha de pagamento que usa o Wraith para habilitar pagamentos privados a prestadores, protegendo a privacidade financeira dos recebedores em diferentes jurisdições.",
+      "ogImage": {
+        "title": "Provedor de folha anônimo",
+        "subtitle": "Pagamentos privados a prestadores"
+      }
+    }
+  },
   "caseStudies": {
     "eyebrow": "ESTUDOS DE CASO",
     "heading": "Soluções de privacidade do mundo real.",

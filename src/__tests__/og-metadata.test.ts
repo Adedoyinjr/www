@@ -10,6 +10,7 @@ import {
   SITE_URL,
   CACHE_CONTROL,
   SUPPORTED_LOCALES,
+  type Locale,
 } from '../utils/og-metadata';
 
 describe('og-metadata: static routes', () => {
@@ -590,5 +591,155 @@ describe('og-metadata: cache control', () => {
     expect(CACHE_CONTROL).toBeTruthy();
     expect(CACHE_CONTROL).toContain('max-age=0');
     expect(CACHE_CONTROL).toContain('s-maxage');
+  });
+});
+
+describe('og-metadata: localized dynamic content', () => {
+  const BLOG_SLUG = 'privacy-by-default';
+  const CASE_STUDY_SLUG = 'payroll-processor';
+
+  function localized(path: string, locale: Locale) {
+    return resolveRouteMetadata(locale === 'en' ? path : `/${locale}${path}`)!;
+  }
+
+  it('keeps English dynamic metadata identical to the source content', () => {
+    const enBlog = localized(`/blog/${BLOG_SLUG}`, 'en');
+    expect(enBlog.title).toBe('Privacy by default — Wraith Protocol');
+    expect(enBlog.description).toBe(
+      'How Wraith makes private payments practical for everyday apps.',
+    );
+    expect(enBlog.ogUrl).toBe(`https://usewraith.xyz/blog/${BLOG_SLUG}`);
+    expect(ogImageSlugFor(`/blog/${BLOG_SLUG}`, 'en')).toBe(`blog-${BLOG_SLUG}`);
+
+    const enCaseStudy = localized(`/case-studies/${CASE_STUDY_SLUG}`, 'en');
+    expect(enCaseStudy.title).toBe('Anonymous Payroll Provider — Wraith Protocol');
+    expect(enCaseStudy.description).toBe(
+      'A payroll processing platform using Wraith to enable private contractor payments, protecting recipient financial privacy across international jurisdictions.',
+    );
+    expect(enCaseStudy.ogUrl).toBe(`https://usewraith.xyz/case-studies/${CASE_STUDY_SLUG}`);
+    expect(ogImageSlugFor(`/case-studies/${CASE_STUDY_SLUG}`, 'en')).toBe(
+      `case-study-${CASE_STUDY_SLUG}`,
+    );
+  });
+
+  it('returns Spanish titles, descriptions and URLs for dynamic routes', () => {
+    const esBlog = localized(`/blog/${BLOG_SLUG}`, 'es');
+    expect(esBlog.locale).toBe('es');
+    expect(esBlog.title).toBe('Privacidad por defecto — Wraith Protocol');
+    expect(esBlog.description).toBe(
+      'Cómo hace Wraith que los pagos privados sean prácticos en el día a día de las aplicaciones.',
+    );
+    expect(esBlog.description).not.toBe(localized(`/blog/${BLOG_SLUG}`, 'en').description);
+    expect(esBlog.ogUrl).toBe(`https://usewraith.xyz/es/blog/${BLOG_SLUG}`);
+
+    const esCaseStudy = localized(`/case-studies/${CASE_STUDY_SLUG}`, 'es');
+    expect(esCaseStudy.title).toBe('Proveedor de nómina anónimo — Wraith Protocol');
+    expect(esCaseStudy.description).toContain('plataforma de procesamiento de nóminas');
+    expect(esCaseStudy.ogUrl).toBe(`https://usewraith.xyz/es/case-studies/${CASE_STUDY_SLUG}`);
+  });
+
+  it('returns Portuguese titles, descriptions and URLs for dynamic routes', () => {
+    const ptBlog = localized(`/blog/${BLOG_SLUG}`, 'pt');
+    expect(ptBlog.locale).toBe('pt');
+    expect(ptBlog.title).toBe('Privacidade por padrão — Wraith Protocol');
+    expect(ptBlog.description).toBe(
+      'Como o Wraith torna pagamentos privados práticos para aplicativos do dia a dia.',
+    );
+    expect(ptBlog.description).not.toBe(localized(`/blog/${BLOG_SLUG}`, 'en').description);
+    expect(ptBlog.ogUrl).toBe(`https://usewraith.xyz/pt/blog/${BLOG_SLUG}`);
+
+    const ptCaseStudy = localized(`/case-studies/${CASE_STUDY_SLUG}`, 'pt');
+    expect(ptCaseStudy.title).toBe('Provedor de folha de pagamento anônimo — Wraith Protocol');
+    expect(ptCaseStudy.description).toContain('processamento de folha de pagamento');
+    expect(ptCaseStudy.ogUrl).toBe(`https://usewraith.xyz/pt/case-studies/${CASE_STUDY_SLUG}`);
+  });
+
+  it('uses locale-prefixed image slugs and localized image URLs', () => {
+    for (const path of [`/blog/${BLOG_SLUG}`, `/case-studies/${CASE_STUDY_SLUG}`]) {
+      expect(ogImageSlugFor(path, 'es')).toBe(`es-${ogImageSlugFor(path, 'en')}`);
+      expect(ogImageSlugFor(path, 'pt')).toBe(`pt-${ogImageSlugFor(path, 'en')}`);
+
+      const en = generateOgImageUrl({ title: 'x' }, 'en');
+      const es = generateOgImageUrl({ title: 'x' }, 'es');
+      expect(es).not.toBe(en);
+    }
+
+    expect(generateOgImageUrl({ title: 'Privacidad por defecto' }, 'es')).toContain('lang=es');
+    expect(generateOgImageUrl({ title: 'Privacidade por padrão' }, 'pt')).toContain('lang=pt');
+  });
+
+  it('renders localized image content for every locale, not just prefixed filenames', () => {
+    const jobs = listOgImageJobs();
+    const blogJobs = jobs.filter((job) => job.routePath === `/blog/${BLOG_SLUG}`);
+    expect(blogJobs).toHaveLength(3);
+
+    const byLocale = new Map(blogJobs.map((job) => [job.locale, job]));
+    const enJob = byLocale.get('en')!;
+    const esJob = byLocale.get('es')!;
+    const ptJob = byLocale.get('pt')!;
+
+    expect(enJob.title).toBe('Privacy by default');
+    expect(enJob.subtitle).toBe('How Wraith makes private payments practical for everyday apps.');
+    expect(esJob.title).toBe('Privacidad por defecto');
+    expect(esJob.subtitle).toBe('Pagos privados en el día a día');
+    expect(ptJob.title).toBe('Privacidade por padrão');
+    expect(ptJob.subtitle).toBe('Pagamentos privados no dia a dia');
+
+    const caseStudies = new Map(
+      jobs
+        .filter((job) => job.routePath === `/case-studies/${CASE_STUDY_SLUG}`)
+        .map((job) => [job.locale, job]),
+    );
+    expect(caseStudies.get('en')!.title).toBe('Anonymous Payroll Provider');
+    expect(caseStudies.get('es')!.title).toBe('Proveedor de nómina anónimo');
+    expect(caseStudies.get('pt')!.title).toBe('Provedor de folha anônimo');
+
+    // The image file name alone must not be what makes a job "localized".
+    expect(esJob.title).not.toBe(enJob.title);
+    expect(ptJob.title).not.toBe(enJob.title);
+    expect(esJob.description).not.toBe(enJob.description);
+    expect(ptJob.description).not.toBe(enJob.description);
+  });
+
+  it('never falls back to English for a route that has a localized configuration', () => {
+    const localizedPaths = listOgImageJobs()
+      .filter((job) => job.locale === 'en')
+      .map((job) => job.routePath);
+    expect(localizedPaths.length).toBeGreaterThan(0);
+
+    for (const path of localizedPaths) {
+      const en = localized(path, 'en');
+      for (const locale of ['es', 'pt'] as const) {
+        const translated = localized(path, locale);
+        expect(
+          translated.description,
+          `${path} (${locale}) reuses the English description`,
+        ).not.toBe(en.description);
+        expect(
+          translated.title !== en.title ||
+            translated.ogImage.title !== en.ogImage.title ||
+            translated.description !== en.description,
+          `${path} (${locale}) reuses the English title, image title and description`,
+        ).toBe(true);
+        expect(translated.ogUrl).toContain(`/${locale}`);
+      }
+    }
+  });
+
+  it('generates one image per route and locale', () => {
+    const jobs = listOgImageJobs();
+    const routePaths = new Set(jobs.map((job) => job.routePath));
+
+    for (const routePath of routePaths) {
+      for (const locale of SUPPORTED_LOCALES) {
+        const job = jobs.find(
+          (candidate) => candidate.routePath === routePath && candidate.locale === locale,
+        );
+        expect(job, `${routePath} (${locale}) has no OG image job`).toBeDefined();
+        expect(job!.file).toMatch(
+          locale === 'en' ? /^[a-z0-9-]+\.png$/ : new RegExp(`^${locale}-`),
+        );
+      }
+    }
   });
 });

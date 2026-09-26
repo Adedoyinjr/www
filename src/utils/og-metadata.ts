@@ -31,6 +31,14 @@ interface StaticRouteContent {
 
 type StaticRouteTable = Record<string, StaticRouteContent>;
 
+interface DynamicRouteContent {
+  title: string;
+  description: string;
+  ogImage: OgImageConfig;
+}
+
+type DynamicRouteTable = Record<string, DynamicRouteContent>;
+
 export interface RouteMetadata {
   title: string;
   description: string;
@@ -57,6 +65,15 @@ const ROUTE_CONTENT: Record<Locale, StaticRouteTable> = {
   en: enStrings.ogRoutes as unknown as StaticRouteTable,
   es: esStrings.ogRoutes as unknown as StaticRouteTable,
   pt: ptStrings.ogRoutes as unknown as StaticRouteTable,
+};
+
+// Localized copy for dynamic routes (blog posts, case studies), keyed by the
+// locale-independent route path. Static routes live in `ogRoutes`; this table
+// is the equivalent for content that ships as Markdown/JSON.
+const DYNAMIC_ROUTE_CONTENT: Record<Locale, DynamicRouteTable> = {
+  en: enStrings.ogContent as unknown as DynamicRouteTable,
+  es: esStrings.ogContent as unknown as DynamicRouteTable,
+  pt: ptStrings.ogContent as unknown as DynamicRouteTable,
 };
 
 const ROUTE_SLUGS: Record<string, string> = {
@@ -107,6 +124,12 @@ const caseStudyEntries = ((caseStudiesData as { entries?: unknown[] }).entries |
 
 function hasStaticRouteConfig(routePath: string): boolean {
   return Object.prototype.hasOwnProperty.call(ROUTE_CONTENT.en, routePath);
+}
+
+function getDynamicRouteContent(routePath: string, locale: Locale): DynamicRouteContent | null {
+  return (
+    DYNAMIC_ROUTE_CONTENT[locale]?.[routePath] ?? DYNAMIC_ROUTE_CONTENT.en?.[routePath] ?? null
+  );
 }
 
 function getStaticRouteConfig(routePath: string, locale: Locale): StaticRouteContent | null {
@@ -188,17 +211,22 @@ export function resolveRouteMetadata(pathname: string): RouteMetadata | null {
     // Unknown slugs 404 in the app, so they must not be served metadata.
     const post = blogManifestData.find((p) => p.slug === blogSlug);
     if (!post) return null;
-    title = `${post.title} — Wraith Protocol`;
-    description = post.excerpt;
-    ogImage = { title: post.title, subtitle: post.excerpt };
+    const content = getDynamicRouteContent(`/blog/${blogSlug}`, locale);
+    title = `${content?.title ?? post.title} — Wraith Protocol`;
+    description = content?.description ?? post.excerpt;
+    ogImage = content?.ogImage ?? { title: post.title, subtitle: post.excerpt };
     ogType = 'article';
     ogUrl = canonicalUrlFor(locale, `/blog/${blogSlug}`);
   } else if (caseStudySlug) {
     const study = caseStudyEntries.find((e) => e.slug === caseStudySlug);
     if (!study) return null;
-    title = `${study.org} — Wraith Protocol`;
-    description = study.summary || 'Built with Wraith stealth addresses.';
-    ogImage = { title: study.org, subtitle: study.summary || 'Case study' };
+    const content = getDynamicRouteContent(`/case-studies/${caseStudySlug}`, locale);
+    title = `${content?.title ?? study.org} — Wraith Protocol`;
+    description = content?.description ?? study.summary ?? 'Built with Wraith stealth addresses.';
+    ogImage = content?.ogImage ?? {
+      title: study.org,
+      subtitle: study.summary ?? 'Case study',
+    };
     ogType = 'article';
     ogUrl = canonicalUrlFor(locale, `/case-studies/${caseStudySlug}`);
   } else {
@@ -319,14 +347,15 @@ export function listOgImageJobs(): OgImageJob[] {
   for (const post of blogManifestData) {
     for (const locale of SUPPORTED_LOCALES) {
       const slug = `blog-${post.slug}`;
+      const content = getDynamicRouteContent(`/blog/${post.slug}`, locale);
       jobs.push({
         slug,
         routePath: `/blog/${post.slug}`,
         locale,
         file: `${localePrefixedSlug(locale, slug)}.png`,
-        title: post.title,
-        subtitle: post.excerpt,
-        description: post.excerpt,
+        title: content?.ogImage.title ?? post.title,
+        subtitle: content?.ogImage.subtitle ?? post.excerpt,
+        description: content?.description ?? post.excerpt,
       });
     }
   }
@@ -334,15 +363,16 @@ export function listOgImageJobs(): OgImageJob[] {
   for (const study of caseStudyEntries) {
     for (const locale of SUPPORTED_LOCALES) {
       const slug = `case-study-${study.slug}`;
-      const subtitle = study.summary || 'Built with Wraith stealth addresses.';
+      const content = getDynamicRouteContent(`/case-studies/${study.slug}`, locale);
       jobs.push({
         slug,
         routePath: `/case-studies/${study.slug}`,
         locale,
         file: `${localePrefixedSlug(locale, slug)}.png`,
-        title: study.org,
-        subtitle,
-        description: subtitle,
+        title: content?.ogImage.title ?? study.org,
+        subtitle: content?.ogImage.subtitle ?? study.summary ?? 'Case study',
+        description:
+          content?.description ?? study.summary ?? 'Built with Wraith stealth addresses.',
       });
     }
   }

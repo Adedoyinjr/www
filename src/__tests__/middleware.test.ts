@@ -575,6 +575,101 @@ describe('middleware: existing behavior preservation', () => {
   });
 });
 
+describe('middleware: localized dynamic content', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('injects Spanish metadata, URL and image for a blog post', async () => {
+    const { response } = await makeRequest(
+      '/es/blog/privacy-by-default',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain('<title>Privacidad por defecto — Wraith Protocol</title>');
+    expect(html).toContain('Cómo hace Wraith que los pagos privados sean prácticos');
+    expect(html).not.toContain('How Wraith makes private payments practical');
+    expect(html).toContain('og:url" content="https://usewraith.xyz/es/blog/privacy-by-default"');
+    expect(html).toContain('og/es-blog-privacy-by-default.png');
+    expect(html).toContain('og:locale" content="es_ES"');
+  });
+
+  it('injects Portuguese metadata, URL and image for a blog post', async () => {
+    const { response } = await makeRequest(
+      '/pt/blog/privacy-by-default',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain('<title>Privacidade por padrão — Wraith Protocol</title>');
+    expect(html).toContain('Como o Wraith torna pagamentos privados práticos');
+    expect(html).not.toContain('How Wraith makes private payments practical');
+    expect(html).toContain('og:url" content="https://usewraith.xyz/pt/blog/privacy-by-default"');
+    expect(html).toContain('og/pt-blog-privacy-by-default.png');
+    expect(html).toContain('og:locale" content="pt_BR"');
+  });
+
+  it('injects Spanish metadata and image for a case study', async () => {
+    const { response } = await makeRequest(
+      '/es/case-studies/payroll-processor',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain('<title>Proveedor de nómina anónimo — Wraith Protocol</title>');
+    expect(html).toContain('plataforma de procesamiento de nóminas');
+    expect(html).toContain('og/es-case-study-payroll-processor.png');
+    expect(html).toContain('https://usewraith.xyz/es/case-studies/payroll-processor');
+  });
+
+  it('injects Portuguese metadata and image for a case study', async () => {
+    const { response } = await makeRequest(
+      '/pt/case-studies/payroll-processor',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain(
+      '<title>Provedor de folha de pagamento anônimo — Wraith Protocol</title>',
+    );
+    expect(html).toContain('processamento de folha de pagamento');
+    expect(html).toContain('og/pt-case-study-payroll-processor.png');
+    expect(html).toContain('https://usewraith.xyz/pt/case-studies/payroll-processor');
+  });
+
+  it('keeps English dynamic routes unprefixed and in English', async () => {
+    const { response } = await makeRequest(
+      '/blog/privacy-by-default',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain('<title>Privacy by default — Wraith Protocol</title>');
+    expect(html).toContain('How Wraith makes private payments practical for everyday apps.');
+    expect(html).toContain('og/blog-privacy-by-default.png');
+    expect(html).not.toContain('og/es-');
+    expect(html).not.toContain('og/pt-');
+    expect(html).toContain('og:url" content="https://usewraith.xyz/blog/privacy-by-default"');
+  });
+
+  it('keeps explicit /en dynamic routes in English without a prefix', async () => {
+    const { response } = await makeRequest(
+      '/en/blog/privacy-by-default',
+      'TwitterBot/1.0',
+      '<html lang="en"><head><title>X</title></head></html>',
+    );
+    const html = await response!.text();
+
+    expect(html).toContain('<title>Privacy by default — Wraith Protocol</title>');
+    expect(html).toContain('og/blog-privacy-by-default.png');
+    expect(html).toContain('og:url" content="https://usewraith.xyz/blog/privacy-by-default"');
+  });
+});
+
 describe('middleware: HTML escaping', () => {
   beforeEach(() => vi.clearAllMocks());
 
