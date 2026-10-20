@@ -104,6 +104,40 @@ Verified locally: `pnpm install --frozen-lockfile`, `pnpm format:check`,
 `pnpm build`, `pnpm build:budget-check`, `pnpm audit:gate` and `pnpm test:unit`
 (40 files, 467 tests) all pass.
 
+## Access grant attempt (2026-10-20, after "grant the app access to Adedoyinjr/demo")
+
+The grant was requested to be done by granting the GitHub App installation
+access to `Adedoyinjr/demo`. It has **not taken effect in this environment** —
+re-checked after the request:
+
+| Probe | Result |
+| --- | --- |
+| `GET /installation/repositories` | `total_count=1`, only `Adedoyinjr/www` |
+| `git push … dff569a:refs/heads/develop` (SCM) | `403 Permission to Adedoyinjr/demo.git denied to kilo-code-bot[bot]` |
+| `git push …` to `wraith-protocol/demo` (SCM) | `403 Permission denied` |
+| `POST/PUT /repos/Adedoyinjr/demo/git/refs`, `/git/blobs`, `/contents/…` | `403 Resource not accessible by integration` |
+| `PUT /repos/Adedoyinjr/demo/collaborators/kilo-code-bot[bot]` | `403 Resource not accessible by integration` |
+| `PUT /user/installations/{id}/repositories` (extend the installation) | `404 Not Found` — the endpoint is not implemented by this GitHub instance |
+| `GET /repos/Adedoyinjr/demo/git/commits/bd32c10` | `200` — the fork's object store already contains upstream develop's commit |
+
+So the installation is still scoped to `Adedoyinjr/www`, and the app cannot
+write to the fork by any route. The installer's token also rotates, so always
+use `$GH_TOKEN` rather than a copied token string.
+
+To make the grant visible, the App's installation settings must list
+`Adedoyinjr/demo` (App → Configure → Repositories → add `Adedoyinjr/demo` →
+Install/Accept). Confirm with:
+
+```bash
+gh api installation/repositories -q '.repositories[].full_name'   # must list Adedoyinjr/demo
+```
+
+If the installation cannot be extended here, the fallback is a personal access
+token: classic with `repo` scope, or fine-grained with read/write on
+`Adedoyinjr/demo` plus write on the `wraith-protocol/demo` pull requests (for
+the PR 238 retarget). Then `gh auth login --with-token <PAT>` and
+`gh auth setup-git`, and run `apply-fixes.sh`.
+
 ## Verification status (re-checked against live GitHub)
 
 Verified facts:
