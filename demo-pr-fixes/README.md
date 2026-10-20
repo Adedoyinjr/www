@@ -104,6 +104,47 @@ Verified locally: `pnpm install --frozen-lockfile`, `pnpm format:check`,
 `pnpm build`, `pnpm build:budget-check`, `pnpm audit:gate` and `pnpm test:unit`
 (40 files, 467 tests) all pass.
 
+## Verification status (re-checked against live GitHub)
+
+Verified facts:
+
+- PR 224 and PR 238 on `wraith-protocol/demo` are **unchanged**. Their head
+  commits are still `ce8c961` and `edf94da`, both still `mergeable_state:
+  dirty`, PR 224's `unit-tests` check still reports `failure`, and PR 238 has no
+  checks at all. Neither PR is fixed on GitHub; the work exists only on the
+  branches below.
+- Both fix branches were re-verified in clean worktrees checked out at the
+  exact commit SHA that is published, running the full CI job sequence from
+  `.github/workflows/ci.yml`:
+  - `dff569a` (PR 224): `format:check` pass, `test:unit` 39 files / 430 tests
+    pass, `build` (tsc + vite) pass, `build:budget-check` pass, `audit:gate`
+    pass.
+  - `559d8da` (PR 238): `format:check` pass, `test:unit` 40 files / 467 tests
+    pass, `build` pass, `build:budget-check` pass, `audit:gate` pass.
+- The PR 224 fix branch keeps develop's `pnpm build:budget-check` and
+  `pnpm audit:gate` steps in the `build` job and adds the `unit-tests` job
+  alongside them.
+- The PR 238 fix branch differs from `wraith-protocol/demo:develop`
+  (`bd32c10`) in six files only; every other path is byte-identical to
+  develop, and develop's storage validation (`MAX_COLLECTION_ITEMS`,
+  `isBoundedString`, `isFiniteTimestamp`, `MAX_STORAGE_BYTES`) and cross-tab
+  sync (`initNameWatchlistSync` / `cleanupNameWatchlistSync`, which
+  `src/App.tsx` imports) are preserved inside the encrypted store.
+
+Unverified / open points:
+
+- No GitHub check has ever run on the fix commits, because they are not on a
+  branch of `wraith-protocol/demo`. The results above are local runs only.
+- The reviewer's request for PR 238 was to "drop the inherited #224 commits".
+  `kilo/wraith-demo-pr238-cleanup` drops the inherited CI change but keeps the
+  scanner-test timeout so the branch is green on its own;
+  `kilo/wraith-demo-pr238-cleanup-minimal` (`11f55bd`) drops it as well and
+  contains only the auction feature (5 files). On the minimal variant
+  `pnpm test:unit` reports 1 failure — the pre-existing
+  `stellar-scanner.worker.test.ts` 5 s timeout, which also fails on
+  `wraith-protocol/demo:develop` itself (1 failed / 429 passed of 430) and is
+  fixed by the PR 224 branch.
+
 ## How to land them
 
 Fetch the fixed branches from the writable fork and push them to the demo fork:
