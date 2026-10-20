@@ -1,0 +1,2626 @@
+diff --git a/src/lib/auctionEncryption.test.ts b/src/lib/auctionEncryption.test.ts
+new file mode 100644
+index 0000000..f780e62
+--- /dev/null
++++ b/src/lib/auctionEncryption.test.ts
+@@ -0,0 +1,114 @@
++import { describe, expect, it } from 'vitest';
++import {
++  AUCTION_VAULT_VERSION,
++  decrypt,
++  decryptBids,
++  encrypt,
++  encryptBids,
++  isValidVault,
++  UnsupportedVersionError,
++  validateVault,
++  type EncryptedBidVault,
++} from '@/lib/auctionEncryption';
++
++const PASSPHRASE = 'correct-horse-battery-staple';
++const WRONG_PASSPHRASE = 'wrong-passphrase';
++const ITERATIONS = 1000;
++
++const bids: Record<
++  string,
++  {
++    name: string;
++    amountStroops: string;
++    depositStroops: string;
++    saltHex: string;
++    revealed: boolean;
++  }
++> = {
++  nova: {
++    name: 'nova',
++    amountStroops: '25000000',
++    depositStroops: '25000000',
++    saltHex: 'ab'.repeat(32),
++    revealed: false,
++  },
++};
++
++function tamperBase64(vault: EncryptedBidVault, index: number): EncryptedBidVault {
++  const data = Buffer.from(vault.data, 'base64');
++  data[index] ^= 0xff;
++  return { ...vault, data: data.toString('base64') };
++}
++
++describe('auction encryption', () => {
++  it('encrypts and decrypts bid recovery material', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    expect(vault.version).toBe(AUCTION_VAULT_VERSION);
++    expect(vault.kdf.iterations).toBe(ITERATIONS);
++    expect(typeof vault.kdf.salt).toBe('string');
++    expect(typeof vault.cipher.iv).toBe('string');
++    expect(typeof vault.data).toBe('string');
++
++    const decrypted = await decryptBids(PASSPHRASE, vault);
++    expect(decrypted).toEqual(bids);
++  });
++
++  it('uses a fresh random salt and IV on every encryption', async () => {
++    const a = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    const b = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    expect(a.kdf.salt).not.toBe(b.kdf.salt);
++    expect(a.cipher.iv).not.toBe(b.cipher.iv);
++    expect(a.data).not.toBe(b.data);
++  });
++
++  it('rejects an incorrect passphrase', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    await expect(decryptBids(WRONG_PASSPHRASE, vault)).rejects.toThrow();
++  });
++
++  it('detects corrupted ciphertext (authentication failure)', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    const corrupted = tamperBase64(vault, 0);
++    await expect(decryptBids(PASSPHRASE, corrupted)).rejects.toThrow();
++  });
++
++  it('detects corrupted authentication tag', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    const data = Buffer.from(vault.data, 'base64');
++    // Flip a byte in the final 16-byte GCM tag.
++    data[data.length - 1] ^= 0xff;
++    const tampered = { ...vault, data: data.toString('base64') };
++    await expect(decryptBids(PASSPHRASE, tampered)).rejects.toThrow();
++  });
++
++  it('rejects unsupported payload versions', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    const bad = { ...vault, version: 99 };
++    expect(() => validateVault(bad)).toThrow(UnsupportedVersionError);
++    expect(isValidVault(bad)).toBe(false);
++  });
++
++  it('rejects invalid vault structures before decryption', async () => {
++    expect(() => validateVault(null)).toThrow();
++    expect(() => validateVault({})).toThrow();
++    expect(() => validateVault({ version: 1 })).toThrow();
++    expect(isValidVault({ version: 1 })).toBe(false);
++    expect(isValidVault(null)).toBe(false);
++    expect(isValidVault(undefined)).toBe(false);
++  });
++
++  it('rejects a missing or short authentication tag', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    const noTag = { ...vault, data: Buffer.from('aa', 'hex').toString('base64') };
++    expect(() => validateVault(noTag)).toThrow();
++  });
++
++  it('never exposes the passphrase or plaintext in the vault payload', async () => {
++    const vault = await encryptBids(PASSPHRASE, bids, ITERATIONS);
++    const serialized = JSON.stringify(vault);
++    expect(serialized).not.toContain(PASSPHRASE);
++    expect(serialized).not.toContain(bids.nova.amountStroops);
++    expect(serialized).not.toContain(bids.nova.saltHex);
++    expect(serialized).not.toContain(bids.nova.depositStroops);
++  });
++});
+diff --git a/src/lib/auctionEncryption.ts b/src/lib/auctionEncryption.ts
+new file mode 100644
+index 0000000..be9234a
+--- /dev/null
++++ b/src/lib/auctionEncryption.ts
+@@ -0,0 +1,396 @@
++/**
++ * Encrypted storage format for Wraith Name auction recovery material.
++ *
++ * The auction watchlist persists sealed-bid recovery secrets (saltHex, bid
++ * amount, deposit amount) so a bid can be revealed after the commit phase.
++ * These values are sensitive: revealing them without authorisation lets an
++ * attacker claim the name or steal the deposit. They must never be written to
++ * localStorage in plaintext.
++ *
++ * Format (version 1):
++ * {
++ *   version: 1,
++ *   kdf: { algorithm: 'PBKDF2', hash: 'SHA-256', iterations: N, salt: base64 },
++ *   cipher: { algorithm: 'AES-GCM', iv: base64, keyLength: 256 },
++ *   data: base64   // AES-GCM ciphertext || 16-byte authentication tag
++ * }
++ *
++ * The plaintext payload is the JSON serialisation of the bids record.
++ * Only the encrypted payload and the non-secret metadata required to derive
++ * the key and verify the ciphertext are ever persisted. The passphrase, the
++ * derived key, and the plaintext bids are never written to localStorage.
++ */
++
++export interface AuctionBid {
++  name: string;
++  amountStroops: string;
++  depositStroops: string;
++  saltHex: string;
++  revealed: boolean;
++}
++
++export const AUCTION_VAULT_VERSION = 1;
++export const AUCTION_STORAGE_KEY = 'wraith-name-auction-watchlist';
++export const LEGACY_STORAGE_KEY = 'wraith-name-auction-watchlist';
++export const LEGACY_FORMAT_VERSION = 0;
++
++// Production-grade PBKDF2 iteration count (OWASP 2023 baseline for
++// PBKDF2-HMAC-SHA256). Tests override this via the `iterations` argument.
++export const DEFAULT_PBKDF2_ITERATIONS = 600_000;
++
++export const SALT_LENGTH = 16; // bytes
++export const IV_LENGTH = 12; // bytes (AES-GCM recommended nonce size)
++export const KEY_BITS = 256;
++
++export interface EncryptedBidVault {
++  version: number;
++  kdf: {
++    algorithm: 'PBKDF2';
++    hash: 'SHA-256';
++    iterations: number;
++    salt: string; // base64
++  };
++  cipher: {
++    algorithm: 'AES-GCM';
++    iv: string; // base64
++    keyLength: number; // bits
++  };
++  data: string; // base64 (ciphertext || 16-byte GCM tag)
++}
++
++export interface BackupPayload {
++  type: 'wraith-name-auction-backup';
++  version: 1;
++  exportedAt: number;
++  vault: EncryptedBidVault;
++}
++
++export class AuctionEncryptionError extends Error {
++  constructor(
++    message: string,
++    public readonly code:
++      | 'invalid_vault'
++      | 'decrypt_failed'
++      | 'unsupported_version' = 'decrypt_failed',
++  ) {
++    super(message);
++    this.name = 'AuctionEncryptionError';
++  }
++}
++
++export class InvalidVaultError extends AuctionEncryptionError {
++  constructor(message: string) {
++    super(message, 'invalid_vault');
++  }
++}
++
++export class UnsupportedVersionError extends AuctionEncryptionError {
++  constructor(version: unknown) {
++    super(`Unsupported vault version: ${String(version)}`, 'unsupported_version');
++  }
++}
++
++function isSecureContextAvailable(): boolean {
++  return typeof globalThis.crypto?.subtle === 'object';
++}
++
++function toBase64(bytes: Uint8Array): string {
++  let binary = '';
++  for (let i = 0; i < bytes.length; i++) {
++    binary += String.fromCharCode(bytes[i]);
++  }
++  if (typeof btoa === 'function') {
++    return btoa(binary);
++  }
++  // Node fallback
++  return Buffer.from(binary, 'binary').toString('base64');
++}
++
++function fromBase64(input: string): Uint8Array {
++  if (typeof atob === 'function') {
++    const binary = atob(input);
++    const bytes = new Uint8Array(binary.length);
++    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
++    return bytes;
++  }
++  // Node fallback
++  return Buffer.from(input, 'base64') as unknown as Uint8Array;
++}
++
++function getSubtle(): SubtleCrypto {
++  if (!isSecureContextAvailable()) {
++    throw new AuctionEncryptionError('Web Crypto API is not available in this environment');
++  }
++  return globalThis.crypto.subtle!;
++}
++
++export function generateRandomBytes(length: number): Uint8Array {
++  return globalThis.crypto.getRandomValues(new Uint8Array(length));
++}
++
++/**
++ * Derive an AES-GCM encryption key from a passphrase using PBKDF2-HMAC-SHA256.
++ * The returned CryptoKey is non-extractable so the raw key bytes never leave
++ * the Web Crypto API boundary.
++ */
++export async function deriveKey(
++  passphrase: string,
++  salt: Uint8Array,
++  iterations: number = DEFAULT_PBKDF2_ITERATIONS,
++): Promise<CryptoKey> {
++  const subtle = getSubtle();
++  const keyMaterial = await subtle.importKey(
++    'raw',
++    new TextEncoder().encode(passphrase),
++    { name: 'PBKDF2' },
++    false,
++    ['deriveKey'],
++  );
++  return subtle.deriveKey(
++    { name: 'PBKDF2', salt: salt as unknown as BufferSource, iterations, hash: 'SHA-256' },
++    keyMaterial,
++    { name: 'AES-GCM', length: KEY_BITS },
++    false,
++    ['encrypt', 'decrypt'],
++  );
++}
++
++/**
++ * Encrypt a plaintext string with a passphrase. Produces a fresh random salt
++ * (for key derivation) and a fresh random IV (for encryption) on every call.
++ * Returns a versioned, self-describing encrypted vault.
++ */
++export async function encrypt(
++  passphrase: string,
++  plaintext: string,
++  iterations: number = DEFAULT_PBKDF2_ITERATIONS,
++): Promise<EncryptedBidVault> {
++  const salt = generateRandomBytes(SALT_LENGTH);
++  const iv = generateRandomBytes(IV_LENGTH);
++  const key = await deriveKey(passphrase, salt, iterations);
++  const subtle = getSubtle();
++  const ciphertext = await subtle.encrypt(
++    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
++    key,
++    new TextEncoder().encode(plaintext),
++  );
++  return {
++    version: AUCTION_VAULT_VERSION,
++    kdf: { algorithm: 'PBKDF2', hash: 'SHA-256', iterations, salt: toBase64(salt) },
++    cipher: { algorithm: 'AES-GCM', iv: toBase64(iv), keyLength: KEY_BITS },
++    data: toBase64(new Uint8Array(ciphertext)),
++  };
++}
++
++/**
++ * Decrypt an encrypted vault with a passphrase. Validates the payload and its
++ * metadata before attempting decryption. Rejects on wrong passphrase or
++ * tampered/corrupted ciphertext (AES-GCM authentication failure).
++ */
++export async function decrypt(passphrase: string, vault: EncryptedBidVault): Promise<string> {
++  validateVault(vault);
++  const salt = fromBase64(vault.kdf.salt);
++  const iv = fromBase64(vault.cipher.iv);
++  const ciphertext = new Uint8Array(fromBase64(vault.data));
++  const key = await deriveKey(passphrase, salt, vault.kdf.iterations);
++  const subtle = getSubtle();
++  let decrypted: ArrayBuffer;
++  try {
++    decrypted = await subtle.decrypt(
++      { name: 'AES-GCM', iv: iv as unknown as BufferSource },
++      key,
++      ciphertext,
++    );
++  } catch (err) {
++    throw new AuctionEncryptionError(
++      'Unable to decrypt recovery material: incorrect passphrase or corrupted data.',
++      'decrypt_failed',
++    );
++  }
++  return new TextDecoder().decode(decrypted);
++}
++
++/** Structural validation of an encrypted vault before decryption is attempted. */
++export function validateVault(vault: unknown): asserts vault is EncryptedBidVault {
++  if (!vault || typeof vault !== 'object') {
++    throw new InvalidVaultError('Vault payload is missing or not an object.');
++  }
++  const v = vault as Record<string, unknown>;
++  if (v.version !== AUCTION_VAULT_VERSION) {
++    throw new UnsupportedVersionError(v.version);
++  }
++  if (!v.kdf || typeof v.kdf !== 'object') {
++    throw new InvalidVaultError('Vault is missing key derivation metadata.');
++  }
++  const kdf = v.kdf as Record<string, unknown>;
++  if (kdf.algorithm !== 'PBKDF2' || kdf.hash !== 'SHA-256') {
++    throw new InvalidVaultError('Unsupported key derivation algorithm.');
++  }
++  if (
++    typeof kdf.iterations !== 'number' ||
++    !Number.isFinite(kdf.iterations) ||
++    kdf.iterations < 1
++  ) {
++    throw new InvalidVaultError('Vault key derivation iteration count is invalid.');
++  }
++  if (typeof kdf.salt !== 'string') {
++    throw new InvalidVaultError('Vault is missing key derivation salt.');
++  }
++  let saltBytes: Uint8Array;
++  try {
++    saltBytes = fromBase64(kdf.salt as string);
++  } catch {
++    throw new InvalidVaultError('Vault key derivation salt is not valid base64.');
++  }
++  if (saltBytes.length !== SALT_LENGTH) {
++    throw new InvalidVaultError('Vault key derivation salt has an unexpected length.');
++  }
++  if (!v.cipher || typeof v.cipher !== 'object') {
++    throw new InvalidVaultError('Vault is missing cipher metadata.');
++  }
++  const cipher = v.cipher as Record<string, unknown>;
++  if (cipher.algorithm !== 'AES-GCM') {
++    throw new InvalidVaultError('Unsupported cipher algorithm.');
++  }
++  if (typeof cipher.keyLength !== 'number' || cipher.keyLength !== KEY_BITS) {
++    throw new InvalidVaultError('Vault cipher key length is invalid.');
++  }
++  if (typeof cipher.iv !== 'string') {
++    throw new InvalidVaultError('Vault is missing encryption IV.');
++  }
++  let ivBytes: Uint8Array;
++  try {
++    ivBytes = fromBase64(cipher.iv as string);
++  } catch {
++    throw new InvalidVaultError('Vault encryption IV is not valid base64.');
++  }
++  if (ivBytes.length !== IV_LENGTH) {
++    throw new InvalidVaultError('Vault encryption IV has an unexpected length.');
++  }
++  if (typeof v.data !== 'string') {
++    throw new InvalidVaultError('Vault is missing encrypted data.');
++  }
++  let dataBytes: Uint8Array;
++  try {
++    dataBytes = fromBase64(v.data as string);
++  } catch {
++    throw new InvalidVaultError('Vault encrypted data is not valid base64.');
++  }
++  // AES-GCM ciphertext must be at least the 16-byte authentication tag.
++  if (dataBytes.length < 16) {
++    throw new InvalidVaultError(
++      'Vault encrypted data is too short to contain an authentication tag.',
++    );
++  }
++}
++
++export function isValidVault(vault: unknown): vault is EncryptedBidVault {
++  try {
++    validateVault(vault);
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++/**
++ * Encrypt the bid recovery map with a passphrase. The plaintext payload is the
++ * JSON serialisation of the bids record.
++ */
++export async function encryptBids(
++  passphrase: string,
++  bids: Record<string, AuctionBid>,
++  iterations: number = DEFAULT_PBKDF2_ITERATIONS,
++): Promise<EncryptedBidVault> {
++  return encrypt(passphrase, JSON.stringify(bids), iterations);
++}
++
++/**
++ * Decrypt an encrypted vault into the bid recovery map. Throws
++ * AuctionEncryptionError on wrong passphrase, corruption, or invalid payload,
++ * and a plain Error if the decrypted payload is not a valid bids record.
++ */
++export async function decryptBids(
++  passphrase: string,
++  vault: EncryptedBidVault,
++): Promise<Record<string, AuctionBid>> {
++  const plaintext = await decrypt(passphrase, vault);
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(plaintext);
++  } catch {
++    throw new AuctionEncryptionError(
++      'Decrypted recovery material is not valid JSON.',
++      'decrypt_failed',
++    );
++  }
++  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
++    throw new AuctionEncryptionError(
++      'Decrypted recovery material is not a bids record.',
++      'decrypt_failed',
++    );
++  }
++  const bids = parsed as Record<string, unknown>;
++  const invalidKeys: string[] = [];
++  for (const [name, value] of Object.entries(bids)) {
++    if (!isAuctionBid(value)) {
++      invalidKeys.push(name);
++    }
++  }
++  if (invalidKeys.length > 0) {
++    throw new AuctionEncryptionError(
++      `Decrypted recovery material contains malformed bid(s): ${invalidKeys.join(', ')}.`,
++      'decrypt_failed',
++    );
++  }
++  return bids as Record<string, AuctionBid>;
++}
++
++/** Build a documented, versioned backup payload suitable for export and later recovery. */
++export function createBackup(vault: EncryptedBidVault): BackupPayload {
++  validateVault(vault);
++  return {
++    type: 'wraith-name-auction-backup',
++    version: 1,
++    exportedAt: Date.now(),
++    vault,
++  };
++}
++
++/** Parse and validate a backup payload (wrapper or raw vault). */
++export function parseBackup(input: unknown): BackupPayload {
++  if (!input || typeof input !== 'object') {
++    throw new InvalidVaultError('Backup payload is missing or not an object.');
++  }
++  const p = input as Record<string, unknown>;
++  if (p.type === 'wraith-name-auction-backup' && p.vault) {
++    const vault = p.vault as EncryptedBidVault;
++    validateVault(vault);
++    return {
++      type: 'wraith-name-auction-backup',
++      version: 1,
++      exportedAt: typeof p.exportedAt === 'number' ? p.exportedAt : Date.now(),
++      vault,
++    };
++  }
++  // Backward-compatible: raw vault.
++  validateVault(p);
++  return {
++    type: 'wraith-name-auction-backup',
++    version: 1,
++    exportedAt: Date.now(),
++    vault: p as EncryptedBidVault,
++  };
++}
++
++export function isAuctionBid(value: unknown): value is AuctionBid {
++  if (!value || typeof value !== 'object') return false;
++  const b = value as Record<string, unknown>;
++  return (
++    typeof b.name === 'string' &&
++    typeof b.amountStroops === 'string' &&
++    typeof b.depositStroops === 'string' &&
++    typeof b.saltHex === 'string' &&
++    typeof b.revealed === 'boolean'
++  );
++}
+diff --git a/src/pages/NamesAuctions.tsx b/src/pages/NamesAuctions.tsx
+index e3f70df..9a9108b 100644
+--- a/src/pages/NamesAuctions.tsx
++++ b/src/pages/NamesAuctions.tsx
+@@ -1,11 +1,11 @@
+-import { useCallback, useEffect, useMemo, useState } from 'react';
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ import { Link } from 'react-router-dom';
+ import { decodeStealthMetaAddress } from '@wraith-protocol/sdk/chains/stellar';
+ import { useStellarWallet } from '@/context/StellarWalletContext';
+ import { useStealthKeys } from '@/context/StealthKeysContext';
+ import { useContacts } from '@/store/contactsStore';
+ import { useNameHistory } from '@/store/nameHistoryStore';
+-import { useNameWatchlistStore } from '@/store/nameWatchlistStore';
++import { useNameWatchlistStore, type AuctionBid } from '@/store/nameWatchlistStore';
+ import { stellarTxUrl } from '@/lib/explorer';
+ import { tryGetStellarContractId } from '@/lib/stellar/deployments';
+ import {
+@@ -61,6 +61,7 @@ export default function NamesAuctions() {
+   const { stellarMetaAddress } = useStealthKeys();
+   const { isKnownAddress } = useContacts();
+   const { isKnownRecipient } = useNameHistory();
++
+   const watchedAuctions = useNameWatchlistStore((state) => state.watchedAuctions);
+   const bids = useNameWatchlistStore((state) => state.bids);
+   const watchAuction = useNameWatchlistStore((state) => state.watchAuction);
+@@ -69,6 +70,17 @@ export default function NamesAuctions() {
+   const markBidRevealed = useNameWatchlistStore((state) => state.markBidRevealed);
+   const removeBid = useNameWatchlistStore((state) => state.removeBid);
+ 
++  const status = useNameWatchlistStore((state) => state.status);
++  const hasLegacyPlaintext = useNameWatchlistStore((state) => state.hasLegacyPlaintext);
++  const hasEncryptedVault = useNameWatchlistStore((state) => state.hasEncryptedVault);
++  const inspectStorage = useNameWatchlistStore((state) => state.inspectStorage);
++  const setPassphrase = useNameWatchlistStore((state) => state.setPassphrase);
++  const unlock = useNameWatchlistStore((state) => state.unlock);
++  const lock = useNameWatchlistStore((state) => state.lock);
++  const exportBackup = useNameWatchlistStore((state) => state.exportBackup);
++  const importBackup = useNameWatchlistStore((state) => state.importBackup);
++  const clearLegacy = useNameWatchlistStore((state) => state.clearLegacy);
++
+   const [auctions, setAuctions] = useState<NameAuction[]>([]);
+   const [config, setConfig] = useState<NameAuctionConfig | null>(null);
+   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+@@ -80,6 +92,16 @@ export default function NamesAuctions() {
+   const [selectedAuction, setSelectedAuction] = useState<NameAuction | null>(null);
+   const [bidAmount, setBidAmount] = useState('');
+ 
++  // Vault UI state
++  const [vaultError, setVaultError] = useState('');
++  const [passphrase, setPassphraseValue] = useState('');
++  const [confirmPassphrase, setConfirmPassphrase] = useState('');
++  const [importing, setImporting] = useState(false);
++  const [importFile, setImportFile] = useState<File | null>(null);
++  const [revealPending, setRevealPending] = useState<NameAuction | null>(null);
++  const [backupReady, setBackupReady] = useState<string | null>(null);
++  const importFileInput = useRef<HTMLInputElement>(null);
++
+   const trackedNames = useMemo(
+     () => [...new Set([...watchedAuctions.map((item) => item.name), ...Object.keys(bids)])],
+     [bids, watchedAuctions],
+@@ -87,6 +109,7 @@ export default function NamesAuctions() {
+   const trackedNamesKey = trackedNames.join('|');
+   const isUnknownContract =
+     !isKnownAddress(NAMES_CONTRACT_ID) && !isKnownRecipient(NAMES_CONTRACT_ID);
++  const unlocked = status === 'unlocked';
+ 
+   const refreshAuctions = useCallback(async () => {
+     setIsLoading(true);
+@@ -105,6 +128,10 @@ export default function NamesAuctions() {
+     }
+   }, [trackedNamesKey]);
+ 
++  useEffect(() => {
++    inspectStorage();
++  }, [inspectStorage]);
++
+   useEffect(() => {
+     void refreshAuctions();
+   }, [refreshAuctions]);
+@@ -170,6 +197,10 @@ export default function NamesAuctions() {
+         : '';
+ 
+   const placeBid = async () => {
++    if (!unlocked) {
++      setError('Set a passphrase to secure your bid recovery material before placing a bid.');
++      return;
++    }
+     if (!address || !selectedAuction || parsedBid === null || bidError) return;
+     const action = `bid:${selectedAuction.name}`;
+     setPendingAction(action);
+@@ -183,6 +214,16 @@ export default function NamesAuctions() {
+         parsedBid,
+         saltHex,
+       );
++      // Persist and verify the recovery record BEFORE signing or broadcasting the
++      // on-chain commit. If storage or verification fails, stop here and show an
++      // error: no transaction is ever submitted without a durable recovery record.
++      await saveBid({
++        name: selectedAuction.name,
++        amountStroops: parsedBid.toString(),
++        depositStroops: parsedBid.toString(),
++        saltHex,
++        revealed: false,
++      });
+       const submitted = await submitAuctionTransaction(action, () =>
+         buildCommitNameBidTransaction(address, {
+           name: selectedAuction.name,
+@@ -191,17 +232,12 @@ export default function NamesAuctions() {
+         }),
+       );
+       if (submitted) {
+-        saveBid({
+-          name: selectedAuction.name,
+-          amountStroops: parsedBid.toString(),
+-          depositStroops: parsedBid.toString(),
+-          saltHex,
+-          revealed: false,
+-        });
+         watchAuction({ name: selectedAuction.name, endsAt: selectedAuction.revealEnd });
+         setSelectedAuction(null);
+         setBidAmount('');
+       }
++      // If submission fails or its outcome is ambiguous, the persisted recovery
++      // record is retained so the bid can be retried or revealed after a reload.
+     } catch (commitmentError) {
+       setError(
+         commitmentError instanceof Error ? commitmentError.message : 'Failed to prepare bid',
+@@ -212,9 +248,15 @@ export default function NamesAuctions() {
+   };
+ 
+   const revealBid = async (auction: NameAuction) => {
++    if (!unlocked) {
++      setRevealPending(auction);
++      setError('Unlock your vault with your passphrase before revealing a bid.');
++      return;
++    }
+     if (!address) return;
+     const bid = bids[auction.name];
+     if (!bid) return;
++    setRevealPending(auction);
+     const submitted = await submitAuctionTransaction(`reveal:${auction.name}`, () =>
+       buildRevealNameBidTransaction(address, {
+         name: auction.name,
+@@ -222,7 +264,14 @@ export default function NamesAuctions() {
+         saltHex: bid.saltHex,
+       }),
+     );
+-    if (submitted) markBidRevealed(auction.name);
++    setRevealPending(null);
++    if (submitted) {
++      try {
++        await markBidRevealed(auction.name);
++      } catch {
++        // reveal transaction submitted; marking revealed is best-effort local state
++      }
++    }
+   };
+ 
+   const settleAuction = async (auction: NameAuction) => {
+@@ -244,7 +293,13 @@ export default function NamesAuctions() {
+     const submitted = await submitAuctionTransaction(`claim:${auction.name}`, () =>
+       buildClaimAuctionNameTransaction(address, auction.name, metaAddress),
+     );
+-    if (submitted) removeBid(auction.name);
++    if (submitted) {
++      try {
++        await removeBid(auction.name);
++      } catch {
++        // claim submitted; local bid removal is best-effort
++      }
++    }
+   };
+ 
+   const refundBid = async (auction: NameAuction) => {
+@@ -252,9 +307,124 @@ export default function NamesAuctions() {
+     const submitted = await submitAuctionTransaction(`refund:${auction.name}`, () =>
+       buildRefundNameBidTransaction(address, auction.name),
+     );
+-    if (submitted) removeBid(auction.name);
++    if (submitted) {
++      try {
++        await removeBid(auction.name);
++      } catch {
++        // refund submitted; local bid removal is best-effort
++      }
++    }
++  };
++
++  // Vault actions
++  const handleSetPassphrase = async () => {
++    setVaultError('');
++    try {
++      if (passphrase !== confirmPassphrase) {
++        throw new Error('Passphrases do not match.');
++      }
++      if (status === 'legacy') {
++        await setPassphrase(passphrase); // migrates legacy plaintext
++      } else {
++        await setPassphrase(passphrase); // creates new vault
++      }
++      setPassphraseValue('');
++      setConfirmPassphrase('');
++    } catch (err) {
++      setVaultError(err instanceof Error ? err.message : 'Failed to set up encryption.');
++    }
++  };
++
++  const handleUnlock = async () => {
++    setVaultError('');
++    try {
++      await unlock(passphrase);
++      setPassphraseValue('');
++    } catch (err) {
++      setVaultError(err instanceof Error ? err.message : 'Unable to unlock vault.');
++    }
++  };
++
++  const handleBackup = async () => {
++    setVaultError('');
++    setBackupReady(null);
++    try {
++      const json = await exportBackup();
++      const blob = new Blob([json], { type: 'application/json' });
++      const url = URL.createObjectURL(blob);
++      const a = document.createElement('a');
++      a.href = url;
++      a.download = `wraith-name-auction-backup-${Date.now()}.json`;
++      document.body.appendChild(a);
++      a.click();
++      document.body.removeChild(a);
++      URL.revokeObjectURL(url);
++      setBackupReady(json);
++    } catch (err) {
++      setVaultError(err instanceof Error ? err.message : 'Backup failed.');
++    }
+   };
+ 
++  const handleImportFile = async (file: File) => {
++    setVaultError('');
++    setImporting(true);
++    try {
++      const text = await file.text();
++      // Never silently replace a non-empty current vault. Require explicit
++      // confirmation before importing overwrites the current recovery secrets.
++      let replace = false;
++      if (hasEncryptedVault) {
++        const confirmed = window.confirm(
++          'Your current vault already contains bid recovery secrets. Importing this backup will replace it. Export your current vault first, or click OK to confirm replacement.',
++        );
++        if (!confirmed) {
++          setImporting(false);
++          return;
++        }
++        replace = true;
++      }
++      await importBackup(text, passphrase, { replace });
++      setPassphraseValue('');
++      setImportFile(null);
++    } catch (err) {
++      setVaultError(err instanceof Error ? err.message : 'Import failed.');
++    } finally {
++      setImporting(false);
++    }
++  };
++
++  const handleClearLegacy = async () => {
++    setVaultError('');
++    if (!hasLegacyPlaintext) return;
++    if (
++      !confirm(
++        'This will permanently delete the unencrypted legacy bid recovery material from localStorage. The encrypted vault must already exist. Continue?',
++      )
++    ) {
++      return;
++    }
++    try {
++      const cleared = await clearLegacy();
++      if (!cleared) {
++        setVaultError('No legacy plaintext found to clear.');
++      }
++    } catch (err) {
++      setVaultError(err instanceof Error ? err.message : 'Failed to clear legacy plaintext.');
++    }
++  };
++
++  const bidCount = Object.keys(bids).length;
++  const statusLabel =
++    status === 'empty'
++      ? 'No vault'
++      : status === 'legacy'
++        ? 'Legacy plaintext (unmigrated)'
++        : status === 'locked'
++          ? 'Vault locked'
++          : status === 'unlocked'
++            ? 'Vault unlocked'
++            : 'Error';
++
+   if (!isConnected) {
+     return (
+       <section className="flex flex-col gap-3">
+@@ -285,10 +455,162 @@ export default function NamesAuctions() {
+         </h1>
+         <p className="font-body text-sm leading-relaxed text-on-surface-variant">
+           Bid privately during the commit phase, reveal your bid, then claim the name or refund your
+-          deposit after the auction.
++          deposit after the auction. Bid recovery material (salt, amount, deposit) is encrypted with
++          your passphrase and never written to localStorage in plaintext.
+         </p>
+       </div>
+ 
++      {/* Recovery vault controls */}
++      <div className="border border-outline-variant bg-surface-container p-4 sm:p-5">
++        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
++          <div>
++            <span className="font-heading text-xs font-semibold uppercase tracking-widest text-on-surface">
++              Recovery vault
++            </span>
++            <span
++              className={`font-mono text-[10px] uppercase tracking-widest ml-2 ${
++                status === 'unlocked'
++                  ? 'text-tertiary'
++                  : status === 'legacy'
++                    ? 'text-error'
++                    : 'text-outline'
++              }`}
++            >
++              [{statusLabel}]
++            </span>
++          </div>
++          {status === 'unlocked' && (
++            <button
++              type="button"
++              onClick={lock}
++              className="h-9 border border-outline-variant px-3 font-heading text-[10px] font-semibold uppercase tracking-widest text-outline transition-colors hover:bg-surface-bright"
++            >
++              Lock
++            </button>
++          )}
++        </div>
++
++        {vaultError && (
++          <p role="alert" className="mt-2 font-mono text-xs text-error">
++            {vaultError}
++          </p>
++        )}
++
++        {status === 'empty' || status === 'legacy' || status === 'locked' ? (
++          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
++            <div className="flex-1">
++              <label className="block font-mono text-[10px] uppercase tracking-widest text-outline mb-1">
++                {status === 'empty'
++                  ? 'Set passphrase'
++                  : status === 'locked'
++                    ? 'Unlock passphrase'
++                    : 'Migration passphrase'}
++              </label>
++              <input
++                type="password"
++                value={passphrase}
++                onChange={(e) => setPassphraseValue(e.target.value)}
++                placeholder="••••••••"
++                className="h-10 w-full border border-outline-variant bg-surface px-3 font-mono text-sm text-primary focus:border-primary"
++              />
++            </div>
++            {status !== 'empty' && (
++              <div className="flex-1">
++                <label className="block font-mono text-[10px] uppercase tracking-widest text-outline mb-1">
++                  Confirm passphrase
++                </label>
++                <input
++                  type="password"
++                  value={confirmPassphrase}
++                  onChange={(e) => setConfirmPassphrase(e.target.value)}
++                  placeholder="••••••••"
++                  className="h-10 w-full border border-outline-variant bg-surface px-3 font-mono text-sm text-primary focus:border-primary"
++                />
++              </div>
++            )}
++            <button
++              type="button"
++              onClick={status === 'locked' ? handleUnlock : handleSetPassphrase}
++              disabled={!passphrase || (status !== 'locked' && passphrase !== confirmPassphrase)}
++              className="h-10 bg-primary px-4 font-heading text-[10px] font-semibold uppercase tracking-widest text-surface transition-colors hover:brightness-110 disabled:opacity-30"
++            >
++              {status === 'locked'
++                ? 'Unlock'
++                : status === 'legacy'
++                  ? 'Migrate & encrypt'
++                  : 'Set up encryption'}
++            </button>
++          </div>
++        ) : null}
++
++        {status === 'unlocked' && (
++          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
++            <p className="font-mono text-xs text-outline">
++              {bidCount} bid recovery secret(s) held in memory only.
++            </p>
++            <button
++              type="button"
++              onClick={handleBackup}
++              disabled={!hasEncryptedVault}
++              className="h-9 border border-primary px-3 font-heading text-[10px] font-semibold uppercase tracking-widest text-primary disabled:opacity-30 transition-colors hover:bg-surface-bright"
++            >
++              Backup encrypted vault
++            </button>
++            <input
++              type="file"
++              accept=".json"
++              hidden
++              ref={importFileInput}
++              onChange={(e) => {
++                const file = e.target.files?.[0] ?? null;
++                setImportFile(file);
++                if (file) void handleImportFile(file);
++              }}
++            />
++            <button
++              type="button"
++              onClick={() => importFileInput.current?.click()}
++              className="h-9 border border-outline-variant px-3 font-heading text-[10px] font-semibold uppercase tracking-widest text-outline transition-colors hover:bg-surface-bright"
++            >
++              Import / Recover backup
++            </button>
++            {hasLegacyPlaintext && (
++              <button
++                type="button"
++                onClick={handleClearLegacy}
++                className="h-9 border border-error text-error px-3 font-heading text-[10px] font-semibold uppercase tracking-widest transition-colors hover:bg-surface-bright"
++              >
++                Clear legacy plaintext
++              </button>
++            )}
++            {backupReady && (
++              <p className="font-mono text-xs text-tertiary">
++                Backup exported (encrypted, passphrase required to restore).
++              </p>
++            )}
++          </div>
++        )}
++      </div>
++
++      {error && (
++        <p role="alert" className="font-body text-sm text-error">
++          {error}
++        </p>
++      )}
++      {txHash && (
++        <p className="font-body text-sm text-tertiary">
++          Transaction submitted.{' '}
++          <a
++            href={stellarTxUrl(txHash)}
++            target="_blank"
++            rel="noreferrer"
++            className="font-mono underline"
++          >
++            View transaction
++          </a>
++        </p>
++      )}
++
+       <div className="flex gap-2">
+         <input
+           value={lookupName}
+@@ -311,22 +633,10 @@ export default function NamesAuctions() {
+         </button>
+       </div>
+ 
+-      {error && (
+-        <p role="alert" className="font-body text-sm text-error">
+-          {error}
+-        </p>
+-      )}
+-      {txHash && (
+-        <p className="font-body text-sm text-tertiary">
+-          Transaction submitted.{' '}
+-          <a
+-            href={stellarTxUrl(txHash)}
+-            target="_blank"
+-            rel="noreferrer"
+-            className="font-mono underline"
+-          >
+-            View transaction
+-          </a>
++      {revealPending && (
++        <p className="font-mono text-xs text-outline">
++          Ready to reveal {revealPending.name}.wraith. Unlock the vault above, then select Reveal
++          bid again.
+         </p>
+       )}
+ 
+@@ -422,10 +732,14 @@ export default function NamesAuctions() {
+                     <button
+                       type="button"
+                       onClick={() => void revealBid(auction)}
+-                      disabled={pendingAction === `reveal:${auction.name}`}
++                      disabled={pendingAction === `reveal:${auction.name}` || !unlocked}
+                       className="h-9 bg-primary px-4 font-heading text-[10px] font-semibold uppercase tracking-widest text-surface disabled:opacity-40"
+                     >
+-                      {pendingAction === `reveal:${auction.name}` ? 'Revealing...' : 'Reveal bid'}
++                      {pendingAction === `reveal:${auction.name}`
++                        ? 'Revealing...'
++                        : !unlocked
++                          ? 'Unlock to reveal'
++                          : 'Reveal bid'}
+                     </button>
+                   )}
+                   {phase === 'ended' && (
+@@ -495,6 +809,14 @@ export default function NamesAuctions() {
+               </button>
+             </div>
+ 
++            {unlocked ? null : (
++              <div className="mb-4 p-3 border border-outline-variant/50 bg-surface-bright">
++                <p className="font-mono text-[10px] text-error">
++                  Set up your encryption passphrase in the vault section above before placing a bid.
++                </p>
++              </div>
++            )}
++
+             <label className="mt-5 block font-mono text-[10px] uppercase tracking-widest text-outline">
+               Bid amount (XLM)
+             </label>
+@@ -527,8 +849,9 @@ export default function NamesAuctions() {
+             )}
+ 
+             <p className="mt-4 font-body text-xs leading-relaxed text-outline">
+-              Your amount and recovery secret stay in this browser until reveal. Clearing site data
+-              before revealing can make the bid unrecoverable.
++              Your amount and recovery secret stay encrypted in this browser until reveal. Clearing
++              site data before revealing can make the bid unrecoverable. Export a backup after
++              setting your passphrase.
+             </p>
+ 
+             {error && (
+@@ -543,7 +866,8 @@ export default function NamesAuctions() {
+               disabled={
+                 parsedBid === null ||
+                 Boolean(bidError) ||
+-                pendingAction === `bid:${selectedAuction.name}`
++                pendingAction === `bid:${selectedAuction.name}` ||
++                !unlocked
+               }
+               className="mt-5 h-11 w-full bg-primary font-heading text-[11px] font-semibold uppercase tracking-widest text-surface disabled:opacity-30"
+             >
+diff --git a/src/store/nameWatchlistStore.test.ts b/src/store/nameWatchlistStore.test.ts
+index c0d09d3..1080bdb 100644
+--- a/src/store/nameWatchlistStore.test.ts
++++ b/src/store/nameWatchlistStore.test.ts
+@@ -1,4 +1,5 @@
+-import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import { decryptBids } from '@/lib/auctionEncryption';
+ 
+ class MemoryStorage implements Storage {
+   private values = new Map<string, string>();
+@@ -28,89 +29,116 @@ class MemoryStorage implements Storage {
+   }
+ }
+ 
+-class MockWindow {
+-  localStorage: Storage;
+-  private listeners: Map<string, ((e: StorageEvent) => void)[]> = new Map();
++let storage: MemoryStorage;
+ 
+-  constructor(storage: Storage) {
+-    this.localStorage = storage;
+-  }
++beforeEach(() => {
++  vi.resetModules();
++  storage = new MemoryStorage();
++  vi.stubGlobal('localStorage', storage);
++  vi.stubGlobal('window', { localStorage: storage });
++});
+ 
+-  addEventListener(event: string, listener: (e: StorageEvent) => void) {
+-    if (!this.listeners.has(event)) {
+-      this.listeners.set(event, []);
+-    }
+-    this.listeners.get(event)!.push(listener);
+-  }
++async function loadStore() {
++  return await import('./nameWatchlistStore');
++}
+ 
+-  removeEventListener(event: string, listener: (e: StorageEvent) => void) {
+-    const eventListeners = this.listeners.get(event);
+-    if (eventListeners) {
+-      const index = eventListeners.indexOf(listener);
+-      if (index > -1) {
+-        eventListeners.splice(index, 1);
+-      }
+-    }
+-  }
++const legacyPayload = {
++  version: 0,
++  state: {
++    watchedAuctions: [{ name: 'NOVA', endsAt: 1_800_000_000 }],
++    bids: {
++      nova: {
++        name: 'nova',
++        amountStroops: '25000000',
++        depositStroops: '25000000',
++        saltHex: 'ab'.repeat(32),
++        revealed: false,
++      },
++    },
++  },
++};
+ 
+-  dispatchEvent(event: StorageEvent) {
+-    const eventListeners = this.listeners.get(event.type);
+-    if (eventListeners) {
+-      eventListeners.forEach((listener) => listener(event));
+-    }
+-  }
+-}
++const passphrase = 'Passw0rd!Passw0rd!';
++const iterations = 1000;
++
++const newBid = {
++  name: 'nova',
++  amountStroops: '25000000',
++  depositStroops: '25000000',
++  saltHex: 'ab'.repeat(32),
++  revealed: false,
++};
+ 
+-describe('name auction watchlist', () => {
+-  beforeEach(() => {
+-    vi.resetModules();
+-    const storage = new MemoryStorage();
+-    const mockWindow = new MockWindow(storage);
+-    vi.stubGlobal('localStorage', storage);
+-    vi.stubGlobal('window', mockWindow);
++describe('name auction watchlist (encrypted recovery)', () => {
++  it('starts empty when there is no stored vault or legacy data', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    store.inspectStorage();
++    const state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('empty');
++    expect(state.getBids()).toEqual({});
++    expect(state.hasLegacyPlaintext).toBe(false);
++    expect(state.hasEncryptedVault).toBe(false);
+   });
+ 
+-  afterEach(async () => {
+-    const { cleanupNameWatchlistSync } = await import('./nameWatchlistStore');
+-    cleanupNameWatchlistSync();
++  it('restores watched auctions without decrypting bids while locked', async () => {
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++    storeA.watchAuction({ name: 'nova', endsAt: 1_800_000_000 });
++    storeA.lock();
++
++    // Simulate a page reload: fresh module instance, same localStorage.
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    storeB.inspectStorage();
++    const state = StoreB.getState();
++    expect(state.getStatus()).toBe('locked');
++    expect(state.getBids()).toEqual({});
++    expect(state.watchedAuctions).toEqual([{ name: 'nova', endsAt: 1_800_000_000 }]);
++    expect(state.hasEncryptedVault).toBe(true);
+   });
+ 
+-  it('restores watched auctions and sealed bid recovery data', async () => {
+-    const { useNameWatchlistStore, initNameWatchlistSync } = await import('./nameWatchlistStore');
+-    initNameWatchlistSync();
++  it('detects existing legacy plaintext as legacy status', async () => {
++    const { useNameWatchlistStore } = await loadStore();
+     const store = useNameWatchlistStore.getState();
+-    store.watchAuction({ name: 'NOVA', endsAt: 1_800_000_000 });
+-    store.saveBid({
+-      name: 'NOVA',
+-      amountStroops: '25000000',
+-      depositStroops: '25000000',
+-      saltHex: 'ab'.repeat(32),
+-      revealed: false,
+-    });
+-
+-    const persisted = localStorage.getItem('wraith-name-auction-watchlist');
+-    expect(persisted).not.toBeNull();
+-    useNameWatchlistStore.setState({ watchedAuctions: [], bids: {} });
+-    localStorage.setItem('wraith-name-auction-watchlist', persisted!);
+-    await useNameWatchlistStore.persist.rehydrate();
++    localStorage.setItem('wraith-name-auction-watchlist', JSON.stringify(legacyPayload));
++    store.inspectStorage();
++    const state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('legacy');
++    expect(state.hasLegacyPlaintext).toBe(true);
++    expect(state.hasEncryptedVault).toBe(false);
++  });
+ 
+-    expect(useNameWatchlistStore.getState().watchedAuctions).toEqual([
+-      { name: 'nova', endsAt: 1_800_000_000 },
+-    ]);
+-    expect(useNameWatchlistStore.getState().bids.nova).toMatchObject({
+-      amountStroops: '25000000',
+-      saltHex: 'ab'.repeat(32),
+-      revealed: false,
+-    });
++  it('detects the versioned plaintext record as legacy plaintext', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem(
++      'wraith-name-auction-watchlist',
++      JSON.stringify({
++        version: 1,
++        data: {
++          watchedAuctions: [{ name: 'nova', endsAt: 1_800_000_000 }],
++          bids: legacyPayload.state.bids,
++        },
++      }),
++    );
++    store.inspectStorage();
++    const state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('legacy');
++    expect(state.hasLegacyPlaintext).toBe(true);
++    expect(state.getBids()).toEqual({});
+   });
+ 
+-  it('recovers from corrupt and unknown-version persisted data', async () => {
++  it('ignores corrupt and unknown-version persisted data', async () => {
+     localStorage.setItem('wraith-name-auction-watchlist', '{not-json');
+-    const { useNameWatchlistStore, initNameWatchlistSync } = await import('./nameWatchlistStore');
+-    initNameWatchlistSync();
+-    await useNameWatchlistStore.persist.rehydrate();
+-    expect(useNameWatchlistStore.getState().watchedAuctions).toEqual([]);
+-    expect(useNameWatchlistStore.getState().bids).toEqual({});
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    store.inspectStorage();
++    let state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('empty');
++    expect(state.watchedAuctions).toEqual([]);
++    expect(state.getBids()).toEqual({});
+ 
+     localStorage.setItem(
+       'wraith-name-auction-watchlist',
+@@ -119,7 +147,491 @@ describe('name auction watchlist', () => {
+         state: { watchedAuctions: [{ name: 'future', endsAt: 1 }], bids: {} },
+       }),
+     );
+-    await useNameWatchlistStore.persist.rehydrate();
++    store.inspectStorage();
++    state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('empty');
++    expect(state.watchedAuctions).toEqual([]);
++  });
++
++  it('drops watched auctions that fail validation', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem(
++      'wraith-name-auction-watchlist',
++      JSON.stringify({
++        version: 0,
++        state: {
++          watchedAuctions: [
++            { name: 'nova', endsAt: 1_800_000_000 },
++            { name: '', endsAt: 1_800_000_000 },
++            { name: 'bad', endsAt: Number.NaN },
++          ],
++          bids: {},
++        },
++      }),
++    );
++    store.inspectStorage();
++    expect(useNameWatchlistStore.getState().watchedAuctions).toEqual([
++      { name: 'nova', endsAt: 1_800_000_000 },
++    ]);
++  });
++
++  it('creates an encrypted vault without writing plaintext secrets to localStorage', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    store.inspectStorage();
++    await store.setPassphrase(passphrase, iterations);
++    const state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('unlocked');
++
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).not.toBeNull();
++    const parsed = JSON.parse(raw!);
++    expect(parsed.version).toBe(1);
++    expect(parsed.encryptedBids).toBeDefined();
++
++    // Plaintext recovery secrets must never appear in localStorage.
++    expect(raw).not.toContain(passphrase);
++  });
++
++  it('persists a new bid only in encrypted form', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    await store.setPassphrase(passphrase, iterations);
++    await store.saveBid(newBid);
++    const state = useNameWatchlistStore.getState();
++    expect(state.getBids().nova?.amountStroops).toBe('25000000');
++    expect(state.getBids().nova?.saltHex).toBe('ab'.repeat(32));
++
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).not.toContain('25000000');
++    expect(raw).not.toContain('abababab');
++    const parsed = JSON.parse(raw!);
++    expect(parsed.encryptedBids).toBeDefined();
++  });
++
++  it('rejects saving a bid while the vault is locked', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    store.inspectStorage();
++    await expect(store.saveBid(newBid)).rejects.toThrow(/locked/i);
++  });
++
++  it('unlocks an existing vault after a simulated reload', async () => {
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++    await storeA.saveBid(newBid);
++
++    // Simulate a page reload: fresh module instance, same localStorage.
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    storeB.inspectStorage();
++    let state = StoreB.getState();
++    expect(state.getStatus()).toBe('locked');
++    expect(state.getBids()).toEqual({});
++
++    await storeB.unlock(passphrase);
++    state = StoreB.getState();
++    expect(state.getStatus()).toBe('unlocked');
++    expect(state.getBids().nova?.amountStroops).toBe('25000000');
++    expect(state.getBids().nova?.saltHex).toBe('ab'.repeat(32));
++  });
++
++  it('rejects an incorrect passphrase on unlock', async () => {
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    storeB.inspectStorage();
++    await expect(storeB.unlock('wrong-passphrase!')).rejects.toThrow();
++    const state = StoreB.getState();
++    expect(state.getStatus()).toBe('error');
++    expect(state.getBids()).toEqual({});
++  });
++
++  it('migrates legacy plaintext bids into an encrypted vault', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem('wraith-name-auction-watchlist', JSON.stringify(legacyPayload));
++    store.inspectStorage();
++    let state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('legacy');
++
++    await store.setPassphrase(passphrase, iterations);
++    state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('unlocked');
++    expect(state.getBids().nova?.amountStroops).toBe('25000000');
++    expect(state.getBids().nova?.saltHex).toBe('ab'.repeat(32));
++
++    // The encrypted replacement exists in the active record.
++    expect(state.hasEncryptedVault).toBe(true);
++
++    // Legacy plaintext remains in the canonical store until explicitly cleared.
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).toContain('"version":0');
++    expect(raw).toContain('25000000');
++  });
++
++  it('migration keeps legacy plaintext until explicitly cleared', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem('wraith-name-auction-watchlist', JSON.stringify(legacyPayload));
++    store.inspectStorage();
++    await store.setPassphrase(passphrase, iterations);
++
++    // Legacy plaintext still present in localStorage (not yet cleared).
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).toContain('"version":0');
++
++    // Clear is an explicit user action; it requires a verified encrypted replacement.
++    const cleared = await store.clearLegacy();
++    expect(cleared).toBe(true);
++
++    const state = useNameWatchlistStore.getState();
++    expect(state.hasLegacyPlaintext).toBe(false);
++
++    const after = localStorage.getItem('wraith-name-auction-watchlist');
++    const parsed = JSON.parse(after!);
++    expect(parsed.version).toBe(1);
++    expect(parsed.encryptedBids).toBeDefined();
++    expect(after).not.toContain('"version":0');
++    expect(after).not.toContain('25000000');
++  });
++
++  it('refuses to clear legacy plaintext without a verified encrypted replacement', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem('wraith-name-auction-watchlist', JSON.stringify(legacyPayload));
++    store.inspectStorage();
++
++    await expect(store.clearLegacy()).rejects.toThrow(/encrypted replacement/i);
++    // Original legacy data is untouched.
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).toBe(JSON.stringify(legacyPayload));
++  });
++
++  it('clearing legacy is idempotent and safe to repeat', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem('wraith-name-auction-watchlist', JSON.stringify(legacyPayload));
++    store.inspectStorage();
++    await store.setPassphrase(passphrase, iterations);
++    await store.clearLegacy();
++
++    // Second attempt: nothing legacy left, safe no-op.
++    const again = await store.clearLegacy();
++    expect(again).toBe(false);
++  });
++
++  it('migration failure leaves the original plaintext intact', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    localStorage.setItem('wraith-name-auction-watchlist', JSON.stringify(legacyPayload));
++    store.inspectStorage();
++
++    // Passphrase too short -> setup fails before touching storage.
++    await expect(store.setPassphrase('short', iterations)).rejects.toThrow(/at least 8/);
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).toBe(JSON.stringify(legacyPayload));
++  });
++
++  it('exports a documented, versioned backup and recovers from it', async () => {
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++    await storeA.saveBid(newBid);
++
++    const backup = await storeA.exportBackup();
++    const parsed = JSON.parse(backup);
++    expect(parsed.type).toBe('wraith-name-auction-backup');
++    expect(parsed.version).toBe(1);
++    expect(parsed.vault.version).toBe(1);
++
++    // Fresh session: import the backup and recover into an empty vault.
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    localStorage.clear();
++    await storeB.importBackup(backup, passphrase);
++    const state = StoreB.getState();
++    expect(state.getStatus()).toBe('unlocked');
++    expect(state.getBids().nova?.amountStroops).toBe('25000000');
++    expect(state.getBids().nova?.saltHex).toBe('ab'.repeat(32));
++  });
++
++  it('rejects backup import with an incorrect passphrase', async () => {
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++    const backup = await storeA.exportBackup();
++
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    await expect(storeB.importBackup(backup, 'wrong-passphrase!')).rejects.toThrow();
++    const state = StoreB.getState();
++    expect(state.getStatus()).toBe('error');
++  });
++
++  it('rejects import of a corrupted backup', async () => {
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++    const backup = JSON.parse(await storeA.exportBackup());
++    backup.vault.data = 'AAAA'; // corrupted
++    const corrupted = JSON.stringify(backup);
++
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    await expect(storeB.importBackup(corrupted, passphrase)).rejects.toThrow();
++  });
++
++  it('lock clears decrypted bids from memory', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    await store.setPassphrase(passphrase, iterations);
++    await store.saveBid(newBid);
++    let state = useNameWatchlistStore.getState();
++    expect(state.getBids().nova).toBeDefined();
++
++    store.lock();
++    state = useNameWatchlistStore.getState();
++    expect(state.getStatus()).toBe('locked');
++    expect(state.getBids()).toEqual({});
++  });
++
++  it('marks a bid revealed and persists the change encrypted', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    await store.setPassphrase(passphrase, iterations);
++    await store.saveBid(newBid);
++    expect(useNameWatchlistStore.getState().getBids().nova?.revealed).toBe(false);
++
++    await store.markBidRevealed('nova');
++    expect(useNameWatchlistStore.getState().getBids().nova?.revealed).toBe(true);
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).not.toContain('25000000');
++  });
++
++  it('removes a bid and persists the change encrypted', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    await store.setPassphrase(passphrase, iterations);
++    await store.saveBid(newBid);
++    await store.removeBid('nova');
++    expect(useNameWatchlistStore.getState().getBids().nova).toBeUndefined();
++  });
++
++  it('watch and unwatch track auctions without exposing bid secrets', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    store.inspectStorage();
++    await store.setPassphrase(passphrase, iterations);
++
++    store.watchAuction({ name: 'nova', endsAt: 1_800_000_000 });
++    expect(useNameWatchlistStore.getState().getBids()).toEqual({});
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).not.toContain('25000000');
++
++    store.unwatchAuction('nova');
++  });
++});
++
++describe('import backup safety (no silent vault destruction)', () => {
++  const currentBid = {
++    name: 'alpha',
++    amountStroops: '10000000',
++    depositStroops: '10000000',
++    saltHex: 'cd'.repeat(32),
++    revealed: false,
++  };
++  const importedBid = {
++    name: 'beta',
++    amountStroops: '20000000',
++    depositStroops: '20000000',
++    saltHex: 'ef'.repeat(32),
++    revealed: false,
++  };
++
++  async function exportImportedBackup(): Promise<string> {
++    const { useNameWatchlistStore: StoreC } = await loadStore();
++    const storeC = StoreC.getState();
++    await storeC.setPassphrase(passphrase, iterations);
++    await storeC.saveBid(importedBid);
++    return await storeC.exportBackup();
++  }
++
++  async function establishCurrentVault(): Promise<void> {
++    // Start from a clean slate: the exported backup may have left a vault in
++    // shared localStorage, which setPassphrase would otherwise reject.
++    localStorage.clear();
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    await storeA.setPassphrase(passphrase, iterations);
++    await storeA.saveBid(currentBid);
++  }
++
++  it('refuses to replace a non-empty current vault without explicit confirmation', async () => {
++    const backup = await exportImportedBackup();
++    await establishCurrentVault();
++
++    // Fresh session (simulated reload): current vault still holds currentBid.
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    storeB.inspectStorage();
++    expect(storeB.getStatus()).toBe('locked');
++
++    await expect(storeB.importBackup(backup, passphrase)).rejects.toThrow(
++      /current vault|replacement/i,
++    );
++
++    // Current vault untouched: currentBid still recoverable after unlock.
++    await storeB.unlock(passphrase);
++    expect(storeB.getBids().alpha?.saltHex).toBe(currentBid.saltHex);
++    expect(storeB.getBids().beta).toBeUndefined();
++  });
++
++  it('replaces the current vault only when replacement is explicitly confirmed', async () => {
++    const backup = await exportImportedBackup();
++    await establishCurrentVault();
++
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    storeA.inspectStorage();
++    expect(storeA.getStatus()).toBe('locked');
++
++    await storeA.importBackup(backup, passphrase, { replace: true });
++    const state = StoreA.getState();
++    expect(state.getStatus()).toBe('unlocked');
++    expect(state.getBids().beta?.saltHex).toBe(importedBid.saltHex);
++    expect(state.getBids().alpha).toBeUndefined();
++
++    // The replacement is durable across a simulated reload.
++    const { useNameWatchlistStore: StoreB } = await loadStore();
++    const storeB = StoreB.getState();
++    storeB.inspectStorage();
++    await storeB.unlock(passphrase);
++    expect(storeB.getBids().beta?.amountStroops).toBe('20000000');
++    expect(storeB.getBids().alpha).toBeUndefined();
++  });
++
++  it('preserves the current vault when import uses the wrong passphrase', async () => {
++    const backup = await exportImportedBackup();
++    await establishCurrentVault();
++
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    storeA.inspectStorage();
++
++    await expect(
++      storeA.importBackup(backup, 'wrong-passphrase!', { replace: true }),
++    ).rejects.toThrow();
++    // Current vault preserved: unlock with the original passphrase still recovers currentBid.
++    await storeA.unlock(passphrase);
++    expect(storeA.getBids().alpha?.saltHex).toBe(currentBid.saltHex);
++    expect(storeA.getBids().beta).toBeUndefined();
++  });
++
++  it('preserves the current vault when importing a corrupted backup', async () => {
++    const parsed = JSON.parse(await exportImportedBackup());
++    parsed.vault.data = 'AAAA'; // corrupted ciphertext
++    const corrupted = JSON.stringify(parsed);
++    await establishCurrentVault();
++
++    const { useNameWatchlistStore: StoreA } = await loadStore();
++    const storeA = StoreA.getState();
++    storeA.inspectStorage();
++
++    await expect(storeA.importBackup(corrupted, passphrase, { replace: true })).rejects.toThrow();
++    // Current vault preserved.
++    await storeA.unlock(passphrase);
++    expect(storeA.getBids().alpha?.saltHex).toBe(currentBid.saltHex);
++    expect(storeA.getBids().beta).toBeUndefined();
++  });
++});
++
++describe('saveBid read-back verification (submission gate)', () => {
++  const gateBid = {
++    name: 'gate',
++    amountStroops: '7000000',
++    depositStroops: '7000000',
++    saltHex: '01'.repeat(32),
++    revealed: false,
++  };
++
++  it('persists a decryptable, verified recovery record before it can be trusted for submission', async () => {
++    const { useNameWatchlistStore } = await loadStore();
++    const store = useNameWatchlistStore.getState();
++    await store.setPassphrase(passphrase, iterations);
++    await store.saveBid(gateBid);
++
++    // The persisted vault must be decryptable and contain the exact recovery
++    // material (salt + amount) — this is the verification gate that must pass
++    // before an on-chain commit is ever submitted.
++    const raw = localStorage.getItem('wraith-name-auction-watchlist');
++    expect(raw).not.toBeNull();
++    const parsed = JSON.parse(raw!);
++    expect(parsed.encryptedBids).toBeDefined();
++    // Plaintext recovery secrets must never appear in localStorage.
++    expect(raw).not.toContain(gateBid.saltHex);
++    expect(raw).not.toContain(gateBid.amountStroops);
++
++    const decrypted = await decryptBids(passphrase, parsed.encryptedBids);
++    expect(decrypted.gate?.saltHex).toBe(gateBid.saltHex);
++    expect(decrypted.gate?.amountStroops).toBe(gateBid.amountStroops);
++    expect(decrypted.gate?.revealed).toBe(false);
++  });
++});
++
++describe('cross-tab storage sync', () => {
++  it('refreshes the watchlist when another tab writes it', async () => {
++    const { useNameWatchlistStore, initNameWatchlistSync } = await loadStore();
++    const listeners: ((e: StorageEvent) => void)[] = [];
++    vi.stubGlobal('window', {
++      localStorage: storage,
++      addEventListener: (event: string, listener: (e: StorageEvent) => void) => {
++        if (event === 'storage') listeners.push(listener);
++      },
++      removeEventListener: () => {},
++    });
++    initNameWatchlistSync();
++
++    useNameWatchlistStore.getState().inspectStorage();
++    const payload = JSON.stringify({
++      version: 1,
++      data: { watchedAuctions: [{ name: 'nova', endsAt: 1_800_000_000 }], bids: {} },
++    });
++    localStorage.setItem('wraith-name-auction-watchlist', payload);
++    for (const listener of listeners) {
++      listener({ key: 'wraith-name-auction-watchlist', newValue: payload } as StorageEvent);
++    }
++    await Promise.resolve();
++
++    expect(useNameWatchlistStore.getState().watchedAuctions).toEqual([
++      { name: 'nova', endsAt: 1_800_000_000 },
++    ]);
++  });
++
++  it('clears the watchlist when another tab clears storage', async () => {
++    const { useNameWatchlistStore, initNameWatchlistSync } = await loadStore();
++    const listeners: ((e: StorageEvent) => void)[] = [];
++    vi.stubGlobal('window', {
++      localStorage: storage,
++      addEventListener: (event: string, listener: (e: StorageEvent) => void) => {
++        if (event === 'storage') listeners.push(listener);
++      },
++      removeEventListener: () => {},
++    });
++    initNameWatchlistSync();
++
++    useNameWatchlistStore.getState().watchAuction({ name: 'nova', endsAt: 1_800_000_000 });
++    storage.clear();
++    for (const listener of listeners) {
++      listener({ key: null, newValue: null } as StorageEvent);
++    }
++    await Promise.resolve();
++
+     expect(useNameWatchlistStore.getState().watchedAuctions).toEqual([]);
+   });
+ });
+diff --git a/src/store/nameWatchlistStore.tsx b/src/store/nameWatchlistStore.tsx
+index a450779..bce6f8e 100644
+--- a/src/store/nameWatchlistStore.tsx
++++ b/src/store/nameWatchlistStore.tsx
+@@ -1,142 +1,621 @@
+ import { create } from 'zustand';
+-import { persist, type PersistStorage } from 'zustand/middleware';
++
++import type { AuctionBid } from '@/lib/auctionEncryption';
++import {
++  AUCTION_STORAGE_KEY,
++  AUCTION_VAULT_VERSION,
++  DEFAULT_PBKDF2_ITERATIONS,
++  createBackup,
++  decryptBids,
++  deriveKey,
++  encryptBids,
++  isValidVault,
++  parseBackup,
++  type EncryptedBidVault,
++} from '@/lib/auctionEncryption';
+ import {
+   MAX_COLLECTION_ITEMS,
++  MAX_STORAGE_BYTES,
+   isBoundedString,
+   isFiniteTimestamp,
+-  readVersionedValue,
+-  writeVersioned,
+ } from '../lib/versionedStorage';
+ 
++/**
++ * Staging/active storage key for the encrypted bid recovery vault while legacy
++ * plaintext has not yet been explicitly cleared. While legacy plaintext is
++ * present, the canonical key (`wraith-name-auction-watchlist`) holds the
++ * legacy v0 payload untouched and the active record (watched auctions +
++ * encrypted bids) is staged under this vault key. Once the user explicitly
++ * clears the legacy plaintext, the active record is written to the canonical
++ * key and this vault key is removed.
++ */
++export const VAULT_STORAGE_KEY = `${AUCTION_STORAGE_KEY}.vault`;
++
++export type { AuctionBid };
++
+ export interface WatchedNameAuction {
+   name: string;
+   endsAt: number;
+ }
+ 
+-export interface LocalAuctionBid {
+-  name: string;
+-  amountStroops: string;
+-  depositStroops: string;
+-  saltHex: string;
+-  revealed: boolean;
++export type AuctionStatus = 'empty' | 'legacy' | 'locked' | 'unlocked' | 'error';
++
++interface ActiveRecord {
++  watchedAuctions: WatchedNameAuction[];
++  encryptedBids: EncryptedBidVault | null;
+ }
+ 
+ interface NameWatchlistState {
+   watchedAuctions: WatchedNameAuction[];
+-  bids: Record<string, LocalAuctionBid>;
++  bids: Record<string, AuctionBid>;
++  status: AuctionStatus;
++  error: string | null;
++  hasLegacyPlaintext: boolean;
++  hasEncryptedVault: boolean;
++  inspectStorage: () => void;
++  setPassphrase: (passphrase: string, iterations?: number) => Promise<void>;
++  unlock: (passphrase: string) => Promise<void>;
++  lock: () => void;
+   watchAuction: (auction: WatchedNameAuction) => void;
+   unwatchAuction: (name: string) => void;
+-  saveBid: (bid: LocalAuctionBid) => void;
+-  markBidRevealed: (name: string) => void;
+-  removeBid: (name: string) => void;
++  saveBid: (bid: AuctionBid) => Promise<void>;
++  markBidRevealed: (name: string) => Promise<void>;
++  removeBid: (name: string) => Promise<void>;
++  exportBackup: () => Promise<string>;
++  importBackup: (
++    backup: string,
++    passphrase: string,
++    options?: { replace?: boolean },
++  ) => Promise<void>;
++  clearLegacy: () => Promise<boolean>;
++  getBids: () => Record<string, AuctionBid>;
++  getStatus: () => AuctionStatus;
+ }
+ 
+-type PersistedWatchlist = Pick<NameWatchlistState, 'watchedAuctions' | 'bids'>;
++const normalizeName = (name: string) => name.trim().toLowerCase();
+ 
+-function isPersistedWatchlist(value: unknown): value is PersistedWatchlist {
++/**
++ * Watched-auction entries are user-writable, so they are validated and bounded
++ * before they reach the store: unbounded strings or a huge collection would
++ * otherwise be persisted and re-read on every load.
++ */
++function isWatchedAuction(value: unknown): value is WatchedNameAuction {
+   if (typeof value !== 'object' || value === null) return false;
+-  const state = value as Record<string, unknown>;
+-  if (
+-    !Array.isArray(state.watchedAuctions) ||
+-    typeof state.bids !== 'object' ||
+-    state.bids === null
+-  ) {
+-    return false;
+-  }
+-  const watched = state.watchedAuctions as unknown[];
+-  const bids = state.bids as Record<string, unknown>;
++  const auction = value as Record<string, unknown>;
+   return (
+-    watched.length <= MAX_COLLECTION_ITEMS &&
+-    Object.keys(bids).length <= MAX_COLLECTION_ITEMS &&
+-    watched.every((item) => {
+-      if (typeof item !== 'object' || item === null) return false;
+-      const auction = item as Record<string, unknown>;
+-      return (
+-        isBoundedString(auction.name, 128) &&
+-        auction.name.length > 0 &&
+-        isFiniteTimestamp(auction.endsAt)
+-      );
+-    }) &&
+-    Object.values(bids).every((item) => {
+-      if (typeof item !== 'object' || item === null) return false;
+-      const bid = item as Record<string, unknown>;
+-      return (
+-        isBoundedString(bid.name, 128) &&
+-        isBoundedString(bid.amountStroops, 80) &&
+-        isBoundedString(bid.depositStroops, 80) &&
+-        isBoundedString(bid.saltHex, 256) &&
+-        typeof bid.revealed === 'boolean'
+-      );
+-    })
++    isBoundedString(auction.name, 128) &&
++    auction.name.length > 0 &&
++    isFiniteTimestamp(auction.endsAt)
++  );
++}
++
++function sanitizeWatchedAuctions(value: unknown): WatchedNameAuction[] {
++  if (!Array.isArray(value)) return [];
++  return value.filter(isWatchedAuction).slice(0, MAX_COLLECTION_ITEMS);
++}
++
++/**
++ * In-memory derived encryption key, held only while the vault is unlocked.
++ * Cleared on lock, page reload, or logout. Never persisted to localStorage.
++ */
++let activeKey: CryptoKey | null = null;
++let activeKdfMeta: { salt: string; iterations: number } | null = null;
++
++function clearActiveKey() {
++  activeKey = null;
++  activeKdfMeta = null;
++}
++
++function readRaw<T = unknown>(key: string): T | null {
++  try {
++    const raw = localStorage.getItem(key);
++    if (raw === null) return null;
++    if (raw.length > MAX_STORAGE_BYTES) {
++      // Oversized payloads are discarded rather than trusted.
++      localStorage.removeItem(key);
++      return null;
++    }
++    return JSON.parse(raw) as T;
++  } catch {
++    return null;
++  }
++}
++
++function writeRaw(key: string, value: unknown): void {
++  localStorage.setItem(key, JSON.stringify(value));
++}
++
++function removeRaw(key: string): void {
++  localStorage.removeItem(key);
++}
++
++/**
++ * Legacy plaintext formats written before the bids were encrypted:
++ * - zustand-persist: { version: 0, state: { watchedAuctions, bids } }
++ * - versioned value: { version: 1, data: { watchedAuctions, bids } }
++ *
++ * Both hold the recovery secrets in plaintext, so they are only ever read to
++ * migrate them into an encrypted vault and are never written back.
++ */
++function readLegacy(): {
++  bids: Record<string, AuctionBid>;
++  watchedAuctions: WatchedNameAuction[];
++} | null {
++  const raw = readRaw<{
++    version: number;
++    state?: { watchedAuctions?: unknown; bids?: unknown };
++    data?: { watchedAuctions?: unknown; bids?: unknown };
++  }>(AUCTION_STORAGE_KEY);
++  if (!raw) return null;
++
++  const payload = raw.version === 0 ? raw.state : raw.version === 1 ? raw.data : undefined;
++  if (!payload) return null;
++
++  const watchedAuctions = sanitizeWatchedAuctions(payload.watchedAuctions);
++  const bids = payload.bids;
++  if (!bids || typeof bids !== 'object' || Array.isArray(bids)) {
++    return { bids: {}, watchedAuctions };
++  }
++  return { bids: bids as Record<string, AuctionBid>, watchedAuctions };
++}
++
++/** New v1 format: { version: 1, watchedAuctions, encryptedBids: EncryptedBidVault | null } */
++function readCanonicalV1(): ActiveRecord | null {
++  const raw = readRaw<{
++    version: number;
++    watchedAuctions?: unknown;
++    encryptedBids?: unknown;
++  }>(AUCTION_STORAGE_KEY);
++  if (!raw || raw.version !== AUCTION_VAULT_VERSION) return null;
++  // The encrypted canonical record always carries the vault slot. A v1 payload
++  // without it is the legacy versioned plaintext shape, not an encrypted vault.
++  if (!('encryptedBids' in raw)) return null;
++  const watchedAuctions = sanitizeWatchedAuctions(raw.watchedAuctions);
++  const encryptedBids = isValidVault(raw.encryptedBids) ? raw.encryptedBids : null;
++  return { watchedAuctions, encryptedBids };
++}
++
++/** Active record staged under the vault key (pre-clear migration). */
++function readVaultKeyRecord(): ActiveRecord | null {
++  const raw = readRaw<unknown>(VAULT_STORAGE_KEY);
++  if (!raw) return null;
++  let vault: EncryptedBidVault | null = null;
++  let watchedAuctions: unknown = null;
++  try {
++    const parsed = parseBackup(raw);
++    vault = parsed.vault;
++  } catch {
++    if (isValidVault(raw)) {
++      vault = raw as EncryptedBidVault;
++    } else if (raw && typeof raw === 'object' && 'encryptedBids' in raw) {
++      const rec = raw as { watchedAuctions?: unknown; encryptedBids?: unknown };
++      vault = isValidVault(rec.encryptedBids) ? rec.encryptedBids : null;
++      watchedAuctions = rec.watchedAuctions;
++    }
++  }
++  if (!vault) return null;
++  return {
++    watchedAuctions: sanitizeWatchedAuctions(watchedAuctions),
++    encryptedBids: vault,
++  };
++}
++
++/** The currently active record: vault key (pre-clear) else canonical v1 else legacy. */
++function readActive(): (ActiveRecord & { isLegacy: boolean }) | null {
++  const vault = readVaultKeyRecord();
++  if (vault) return { ...vault, isLegacy: false };
++  const canonical = readCanonicalV1();
++  if (canonical) return { ...canonical, isLegacy: false };
++  const legacy = readLegacy();
++  if (legacy)
++    return { watchedAuctions: legacy.watchedAuctions, encryptedBids: null, isLegacy: true };
++  return null;
++}
++
++function activeEncryptedVault(): EncryptedBidVault | null {
++  const active = readActive();
++  return active?.encryptedBids ?? null;
++}
++
++function writeActive(record: ActiveRecord): void {
++  // While legacy plaintext exists, stage under the vault key and leave the
++  // canonical legacy untouched until explicitly cleared.
++  if (readLegacy()) {
++    writeRaw(VAULT_STORAGE_KEY, record);
++  } else {
++    writeRaw(AUCTION_STORAGE_KEY, { version: AUCTION_VAULT_VERSION, ...record });
++  }
++}
++
++function toBase64(bytes: Uint8Array): string {
++  let binary = '';
++  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
++  if (typeof btoa === 'function') {
++    return btoa(binary);
++  }
++  return Buffer.from(binary, 'binary').toString('base64');
++}
++
++function fromBase64(input: string): Uint8Array {
++  if (typeof atob === 'function') {
++    const binary = atob(input);
++    const bytes = new Uint8Array(binary.length);
++    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
++    return bytes;
++  }
++  return Buffer.from(input, 'base64') as unknown as Uint8Array;
++}
++
++/** Re-encrypt bids using the in-memory derived key with a fresh IV every time. */
++async function sealBids(bids: Record<string, AuctionBid>): Promise<EncryptedBidVault> {
++  if (!activeKey || !activeKdfMeta) {
++    throw new Error('Vault is not unlocked. Set a passphrase before saving bids.');
++  }
++  const subtle = globalThis.crypto.subtle;
++  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
++  const ciphertext = await subtle.encrypt(
++    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
++    activeKey,
++    new TextEncoder().encode(JSON.stringify(bids)),
++  );
++  return {
++    version: AUCTION_VAULT_VERSION,
++    kdf: {
++      algorithm: 'PBKDF2',
++      hash: 'SHA-256',
++      iterations: activeKdfMeta.iterations,
++      salt: activeKdfMeta.salt,
++    },
++    cipher: { algorithm: 'AES-GCM', iv: toBase64(iv), keyLength: 256 },
++    data: toBase64(new Uint8Array(ciphertext)),
++  };
++}
++
++async function persistEncrypted(
++  watchedAuctions: WatchedNameAuction[],
++  bids: Record<string, AuctionBid>,
++): Promise<void> {
++  const vault = await sealBids(bids);
++  writeActive({ watchedAuctions, encryptedBids: vault });
++}
++
++/** Decrypt a stored vault using the in-memory derived key (vault must be unlocked). */
++async function decryptVaultWithActiveKey(
++  vault: EncryptedBidVault,
++): Promise<Record<string, AuctionBid>> {
++  if (!activeKey) {
++    throw new Error('Vault is not unlocked.');
++  }
++  const subtle = globalThis.crypto.subtle;
++  const iv = fromBase64(vault.cipher.iv);
++  const ciphertext = new Uint8Array(fromBase64(vault.data));
++  const decrypted = await subtle.decrypt(
++    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
++    activeKey,
++    ciphertext,
+   );
++  const plaintext = new TextDecoder().decode(decrypted);
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(plaintext);
++  } catch {
++    throw new Error('Persisted recovery record is not valid JSON.');
++  }
++  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
++    throw new Error('Persisted recovery record is not a bids record.');
++  }
++  return parsed as Record<string, AuctionBid>;
++}
++
++/** Read back the persisted vault and verify every expected bid is durably stored. */
++async function verifyStoredBids(expected: Record<string, AuctionBid>): Promise<void> {
++  if (!activeKey) {
++    throw new Error('Vault is not unlocked; cannot verify persisted recovery record.');
++  }
++  const active = readActive();
++  const vault = active?.encryptedBids ?? null;
++  if (!vault) {
++    throw new Error('No encrypted vault found after persisting bid.');
++  }
++  const decrypted = await decryptVaultWithActiveKey(vault);
++  for (const [name, bid] of Object.entries(expected)) {
++    const stored = decrypted[name];
++    if (!stored || JSON.stringify(stored) !== JSON.stringify(bid)) {
++      throw new Error(`Persisted recovery record verification failed for ${name}.`);
++    }
++  }
+ }
+ 
+-const watchlistStorage: PersistStorage<NameWatchlistState> = {
+-  getItem: (name) => {
+-    const state = readVersionedValue<PersistedWatchlist>(
+-      localStorage,
+-      name,
+-      isPersistedWatchlist,
+-      (value) => {
+-        const legacy = value as { state?: unknown };
+-        return legacy.state;
+-      },
+-    );
+-    return state ? { state: state as NameWatchlistState, version: 1 } : null;
++export const useNameWatchlistStore = create<NameWatchlistState>((set, get) => ({
++  watchedAuctions: [],
++  bids: {},
++  status: 'empty',
++  error: null,
++  hasLegacyPlaintext: false,
++  hasEncryptedVault: false,
++
++  inspectStorage() {
++    const active = readActive();
++    const hasLegacy = Boolean(active?.isLegacy);
++    const hasEncrypted = Boolean(active?.encryptedBids);
++    set({
++      hasLegacyPlaintext: hasLegacy,
++      hasEncryptedVault: hasEncrypted,
++      watchedAuctions: active?.watchedAuctions ?? [],
++      bids: {},
++      status: hasLegacy ? 'legacy' : hasEncrypted ? 'locked' : 'empty',
++      error: null,
++    });
+   },
+-  setItem: (name, value) =>
+-    writeVersioned(localStorage, name, {
+-      watchedAuctions: value.state.watchedAuctions,
+-      bids: value.state.bids,
+-    }),
+-  removeItem: (name) => localStorage.removeItem(name),
+-};
+ 
+-const normalizeName = (name: string) => name.trim().toLowerCase();
++  async setPassphrase(passphrase: string, iterations: number = DEFAULT_PBKDF2_ITERATIONS) {
++    if (!passphrase || passphrase.length < 8) {
++      throw new Error('Passphrase must be at least 8 characters.');
++    }
++    set({ error: null });
++    clearActiveKey();
++    try {
++      const legacy = readLegacy();
++      const existingVault = activeEncryptedVault();
++
++      if (existingVault && !legacy) {
++        throw new Error('An encrypted vault already exists. Use Unlock instead.');
++      }
++
++      let bidsToEncrypt: Record<string, AuctionBid>;
++      let watchedAuctions = get().watchedAuctions;
++
++      if (legacy) {
++        // Migration: encrypt the legacy plaintext bids.
++        bidsToEncrypt = legacy.bids;
++        watchedAuctions = legacy.watchedAuctions;
++      } else {
++        bidsToEncrypt = {};
++      }
++
++      const vault = await encryptBids(passphrase, bidsToEncrypt, iterations);
++      // Verify the replacement can be decrypted back before trusting it.
++      const verified = await decryptBids(passphrase, vault);
++      if (JSON.stringify(verified) !== JSON.stringify(bidsToEncrypt)) {
++        throw new Error('Encrypted replacement failed verification.');
++      }
++
++      const salt = fromBase64(vault.kdf.salt);
++      activeKey = await deriveKey(passphrase, salt, vault.kdf.iterations);
++      activeKdfMeta = { salt: vault.kdf.salt, iterations: vault.kdf.iterations };
++
++      writeActive({ watchedAuctions, encryptedBids: vault });
++
++      set({
++        bids: bidsToEncrypt,
++        watchedAuctions,
++        status: 'unlocked',
++        error: null,
++        hasLegacyPlaintext: Boolean(legacy),
++        hasEncryptedVault: true,
++      });
++    } catch (err) {
++      clearActiveKey();
++      const message = err instanceof Error ? err.message : 'Failed to set up encryption.';
++      set({ status: 'error', error: message });
++      throw err;
++    }
++  },
++
++  async unlock(passphrase) {
++    set({ error: null });
++    clearActiveKey();
++    try {
++      const vault = activeEncryptedVault();
++      if (!vault) {
++        throw new Error('No encrypted vault to unlock.');
++      }
++      const decrypted = await decryptBids(passphrase, vault);
++      const salt = fromBase64(vault.kdf.salt);
++      activeKey = await deriveKey(passphrase, salt, vault.kdf.iterations);
++      activeKdfMeta = { salt: vault.kdf.salt, iterations: vault.kdf.iterations };
++      set({
++        bids: decrypted,
++        watchedAuctions: readActive()?.watchedAuctions ?? [],
++        status: 'unlocked',
++        error: null,
++        hasEncryptedVault: true,
++      });
++    } catch (err) {
++      clearActiveKey();
++      const message = err instanceof Error ? err.message : 'Unable to unlock vault.';
++      set({ status: 'error', error: message });
++      throw err;
++    }
++  },
++
++  lock() {
++    clearActiveKey();
++    set({ bids: {}, status: 'locked', error: null });
++  },
++
++  watchAuction(auction) {
++    const name = normalizeName(auction.name);
++    const watched = [
++      ...get().watchedAuctions.filter((item) => item.name !== name),
++      { ...auction, name },
++    ];
++    const active = readActive();
++    writeActive({ watchedAuctions: watched, encryptedBids: active?.encryptedBids ?? null });
++    set({ watchedAuctions: watched });
++  },
++
++  unwatchAuction(name) {
++    const watched = get().watchedAuctions.filter((item) => item.name !== normalizeName(name));
++    const active = readActive();
++    writeActive({ watchedAuctions: watched, encryptedBids: active?.encryptedBids ?? null });
++    set({ watchedAuctions: watched });
++  },
++
++  async saveBid(bid) {
++    if (get().status !== 'unlocked') {
++      throw new Error('Vault is locked. Unlock with your passphrase before saving a bid.');
++    }
++    const name = normalizeName(bid.name);
++    const bids = { ...get().bids, [name]: { ...bid, name } };
++    const watched = [...get().watchedAuctions];
++    if (!watched.some((item) => item.name === name)) {
++      watched.push({ name, endsAt: 0 });
++    }
++    await persistEncrypted(watched, bids);
++    // Read back and verify the recovery record is durably stored and decryptable
++    // before it is trusted for on-chain submission.
++    await verifyStoredBids(bids);
++    set({ bids, watchedAuctions: watched });
++  },
++
++  async markBidRevealed(name) {
++    if (get().status !== 'unlocked') {
++      throw new Error('Vault is locked. Unlock with your passphrase before revealing a bid.');
++    }
++    const key = normalizeName(name);
++    const bid = get().bids[key];
++    if (!bid) return;
++    const bids = { ...get().bids, [key]: { ...bid, revealed: true } };
++    await persistEncrypted(get().watchedAuctions, bids);
++    set({ bids });
++  },
+ 
+-export const useNameWatchlistStore = create<NameWatchlistState>()(
+-  persist(
+-    (set) => ({
++  async removeBid(name) {
++    if (get().status !== 'unlocked') {
++      throw new Error('Vault is locked. Unlock with your passphrase before removing a bid.');
++    }
++    const key = normalizeName(name);
++    const bids = { ...get().bids };
++    delete bids[key];
++    await persistEncrypted(get().watchedAuctions, bids);
++    set({ bids });
++  },
++
++  async exportBackup() {
++    const vault = activeEncryptedVault();
++    if (!vault) {
++      throw new Error('No encrypted vault to back up.');
++    }
++    return JSON.stringify(createBackup(vault));
++  },
++
++  async importBackup(backup, passphrase, { replace = false } = {}) {
++    if (!passphrase || passphrase.length < 8) {
++      throw new Error('Passphrase must be at least 8 characters.');
++    }
++    set({ error: null });
++
++    // Refuse to replace a non-empty current vault without explicit confirmation.
++    // This check runs before any decryption or key derivation so the current
++    // vault and its in-memory key are preserved on refusal.
++    const currentVault = activeEncryptedVault();
++    if (currentVault && !replace) {
++      const message =
++        'Current vault already contains bid recovery secrets. Export your current vault first, or confirm replacement.';
++      set({ status: 'error', error: message });
++      throw new Error(message);
++    }
++
++    clearActiveKey();
++    try {
++      const input: unknown = typeof backup === 'string' ? JSON.parse(backup) : backup;
++      const parsed = parseBackup(input);
++      // Decrypt the imported backup to validate the passphrase and ciphertext and
++      // inspect the recovered bids. This does not touch the current vault.
++      const decrypted = await decryptBids(passphrase, parsed.vault);
++      const salt = fromBase64(parsed.vault.kdf.salt);
++      activeKey = await deriveKey(passphrase, salt, parsed.vault.kdf.iterations);
++      activeKdfMeta = { salt: parsed.vault.kdf.salt, iterations: parsed.vault.kdf.iterations };
++      // Only now, after successful validation, overwrite the active record.
++      writeActive({ watchedAuctions: [], encryptedBids: parsed.vault });
++      set({
++        bids: decrypted,
++        watchedAuctions: [],
++        status: 'unlocked',
++        error: null,
++        hasEncryptedVault: true,
++        hasLegacyPlaintext: Boolean(readLegacy()),
++      });
++    } catch (err) {
++      clearActiveKey();
++      const message = err instanceof Error ? err.message : 'Failed to import backup.';
++      set({ status: 'error', error: message });
++      throw err;
++    }
++  },
++
++  async clearLegacy() {
++    const legacy = readLegacy();
++    if (!legacy) {
++      // Nothing legacy to clear. Safe no-op for repeated attempts.
++      return false;
++    }
++    const vault = activeEncryptedVault();
++    if (!vault) {
++      throw new Error(
++        'Cannot clear legacy plaintext: no verified encrypted replacement exists. Back up and migrate first.',
++      );
++    }
++    const active = readActive();
++    // Replace the canonical legacy plaintext with the verified encrypted vault.
++    writeRaw(AUCTION_STORAGE_KEY, {
++      version: AUCTION_VAULT_VERSION,
++      watchedAuctions: active?.watchedAuctions ?? legacy.watchedAuctions,
++      encryptedBids: vault,
++    });
++    removeRaw(VAULT_STORAGE_KEY);
++    set({ hasLegacyPlaintext: false, hasEncryptedVault: true });
++    return true;
++  },
++
++  getBids() {
++    return get().bids;
++  },
++
++  getStatus() {
++    return get().status;
++  },
++}));
++
++/**
++ * Keeps this tab in sync with other tabs that write the watchlist or the
++ * encrypted vault. Encrypted bids are only re-read while this tab holds the
++ * derived key; otherwise the vault stays locked and only the watchlist
++ * metadata is refreshed.
++ */
++async function applyStorageChange() {
++  const active = readActive();
++  if (!active) {
++    useNameWatchlistStore.setState({
+       watchedAuctions: [],
+       bids: {},
+-      watchAuction: (auction: WatchedNameAuction) =>
+-        set((state: NameWatchlistState) => {
+-          const name = normalizeName(auction.name);
+-          return {
+-            watchedAuctions: [
+-              ...state.watchedAuctions.filter((item) => item.name !== name),
+-              { ...auction, name },
+-            ],
+-          };
+-        }),
+-      unwatchAuction: (name: string) =>
+-        set((state: NameWatchlistState) => ({
+-          watchedAuctions: state.watchedAuctions.filter(
+-            (item) => item.name !== normalizeName(name),
+-          ),
+-        })),
+-      saveBid: (bid: LocalAuctionBid) =>
+-        set((state: NameWatchlistState) => {
+-          const name = normalizeName(bid.name);
+-          return { bids: { ...state.bids, [name]: { ...bid, name } } };
+-        }),
+-      markBidRevealed: (name: string) =>
+-        set((state: NameWatchlistState) => {
+-          const key = normalizeName(name);
+-          const bid = state.bids[key];
+-          if (!bid) return state;
+-          return { bids: { ...state.bids, [key]: { ...bid, revealed: true } } };
+-        }),
+-      removeBid: (name: string) =>
+-        set((state: NameWatchlistState) => {
+-          const bids = { ...state.bids };
+-          delete bids[normalizeName(name)];
+-          return { bids };
+-        }),
+-    }),
+-    { name: 'wraith-name-auction-watchlist', storage: watchlistStorage, version: 1 },
+-  ),
+-);
++      status: 'empty',
++      hasLegacyPlaintext: false,
++      hasEncryptedVault: false,
++    });
++    return;
++  }
++
++  const state = useNameWatchlistStore.getState();
++  if (state.status !== 'unlocked' || !active.encryptedBids) {
++    useNameWatchlistStore.setState({
++      watchedAuctions: active.watchedAuctions,
++      status: active.isLegacy ? 'legacy' : active.encryptedBids ? 'locked' : 'empty',
++      hasLegacyPlaintext: active.isLegacy,
++      hasEncryptedVault: Boolean(active.encryptedBids),
++    });
++    return;
++  }
++
++  try {
++    const bids = await decryptVaultWithActiveKey(active.encryptedBids);
++    useNameWatchlistStore.setState({ bids, watchedAuctions: active.watchedAuctions });
++  } catch {
++    // The vault was re-keyed or replaced in another tab: this tab locks again.
++    useNameWatchlistStore.setState({ bids: {}, status: 'locked' });
++  }
++}
+ 
+ let storageListener: ((e: StorageEvent) => void) | null = null;
+ 
+@@ -145,15 +624,8 @@ export function initNameWatchlistSync() {
+   if (typeof window.addEventListener !== 'function') return;
+ 
+   storageListener = (e: StorageEvent) => {
+-    if (e.key === 'wraith-name-auction-watchlist') {
+-      if (e.newValue) {
+-        useNameWatchlistStore.persist.rehydrate();
+-      } else {
+-        useNameWatchlistStore.setState({ watchedAuctions: [], bids: {} });
+-      }
+-    } else if (e.key === null) {
+-      useNameWatchlistStore.setState({ watchedAuctions: [], bids: {} });
+-    }
++    if (e.key !== null && e.key !== AUCTION_STORAGE_KEY && e.key !== VAULT_STORAGE_KEY) return;
++    void applyStorageChange();
+   };
+ 
+   window.addEventListener('storage', storageListener);
+diff --git a/src/workers/stellar-scanner.worker.test.ts b/src/workers/stellar-scanner.worker.test.ts
+index 30cdc5e..5b8232a 100644
+--- a/src/workers/stellar-scanner.worker.test.ts
++++ b/src/workers/stellar-scanner.worker.test.ts
+@@ -341,57 +341,63 @@ describe('stellar-scanner worker message contract', () => {
+     expect(requestedStartLedgers).toEqual([250]);
+   });
+ 
+-  it('paginates past the 1,000-event page cap and reports progress for every page', async () => {
+-    await import('./stellar-scanner.worker');
+-    const requests: Record<string, any>[] = [];
+-    const generated = generateStealthAddress(recipient.spendingPubKey, recipient.viewingPubKey);
+-    const filler = validEvent();
+-
+-    mockPagedGetEvents({
+-      latestLedger: 5_000,
+-      requests,
+-      pages: [
+-        Array.from({ length: 1_000 }, () => ({ ...filler, ledger: 100 })),
+-        [
+-          {
+-            ...buildEventEntry({
+-              schemeId: 1,
+-              stealthAddress: generated.stealthAddress,
+-              caller,
+-              ephemeralPubKey: generated.ephemeralPubKey,
+-              viewTag: generated.viewTag,
+-            }),
+-            ledger: 120,
+-          },
++  // Decoding and scanning a full 1,000-event page is CPU-bound, so this case
++  // needs more than Vitest's 5s default once the whole suite runs in parallel.
++  it(
++    'paginates past the 1,000-event page cap and reports progress for every page',
++    { timeout: 30_000 },
++    async () => {
++      await import('./stellar-scanner.worker');
++      const requests: Record<string, any>[] = [];
++      const generated = generateStealthAddress(recipient.spendingPubKey, recipient.viewingPubKey);
++      const filler = validEvent();
++
++      mockPagedGetEvents({
++        latestLedger: 5_000,
++        requests,
++        pages: [
++          Array.from({ length: 1_000 }, () => ({ ...filler, ledger: 100 })),
++          [
++            {
++              ...buildEventEntry({
++                schemeId: 1,
++                stealthAddress: generated.stealthAddress,
++                caller,
++                ephemeralPubKey: generated.ephemeralPubKey,
++                viewTag: generated.viewTag,
++              }),
++              ledger: 120,
++            },
++          ],
+         ],
+-      ],
+-    });
+-
+-    const { messages, terminal } = await runScan({
+-      rpcUrl: RPC_URL,
+-      announcerContract: CONTRACT_ID,
+-      viewingKey: recipient.viewingKey,
+-      spendingPubKey: recipient.spendingPubKey,
+-      spendingScalar: recipient.spendingScalar,
+-      strategy: 'balanced',
+-    });
++      });
+ 
+-    const pages = messages.filter((message) => message.type === 'PAGE');
+-    expect(pages).toHaveLength(2);
+-    // All 1,000 events share ledger 100 and the page still has a cursor, so the
+-    // ledger could continue on the next page and may not be committed yet.
+-    expect(pages[0]).toMatchObject({ page: 1, events: 1_000, committedLedger: 99 });
+-    // The second page is only reachable by following the RPC cursor.
+-    const dataRequests = requests.filter(
+-      (request) => request.method === 'getEvents' && request.params?.pagination?.limit !== 1,
+-    );
+-    expect(dataRequests[0].params.startLedger).toBe(1);
+-    expect(dataRequests[1].params.pagination.cursor).toBe('cursor-1');
++      const { messages, terminal } = await runScan({
++        rpcUrl: RPC_URL,
++        announcerContract: CONTRACT_ID,
++        viewingKey: recipient.viewingKey,
++        spendingPubKey: recipient.spendingPubKey,
++        spendingScalar: recipient.spendingScalar,
++        strategy: 'balanced',
++      });
+ 
+-    expect(terminal.type).toBe('SUCCESS');
+-    expect(terminal.results).toHaveLength(1);
+-    expect((terminal.results as any)[0].stealthAddress).toBe(generated.stealthAddress);
+-  });
++      const pages = messages.filter((message) => message.type === 'PAGE');
++      expect(pages).toHaveLength(2);
++      // All 1,000 events share ledger 100 and the page still has a cursor, so the
++      // ledger could continue on the next page and may not be committed yet.
++      expect(pages[0]).toMatchObject({ page: 1, events: 1_000, committedLedger: 99 });
++      // The second page is only reachable by following the RPC cursor.
++      const dataRequests = requests.filter(
++        (request) => request.method === 'getEvents' && request.params?.pagination?.limit !== 1,
++      );
++      expect(dataRequests[0].params.startLedger).toBe(1);
++      expect(dataRequests[1].params.pagination.cursor).toBe('cursor-1');
++
++      expect(terminal.type).toBe('SUCCESS');
++      expect(terminal.results).toHaveLength(1);
++      expect((terminal.results as any)[0].stealthAddress).toBe(generated.stealthAddress);
++    },
++  );
+ 
+   it('keeps the committed cursor when a later page fails so the rescan resumes there', async () => {
+     await import('./stellar-scanner.worker');
