@@ -145,6 +145,95 @@ Unverified / open points:
   `wraith-protocol/demo:develop` itself (1 failed / 429 passed of 430) and is
   fixed by the PR 224 branch.
 
+## Current blocker (re-confirmed 2026-10-20)
+
+Both writes were attempted and refused:
+
+```
+$ git push origin dff569a:refs/heads/develop
+remote: Permission to Adedoyinjr/demo.git denied to kilo-code-bot[bot].
+fatal: ... 403
+
+$ git push origin 559d8da:refs/heads/kilo/autumn-tower-oc3-clean
+remote: Permission to Adedoyinjr/demo.git denied to kilo-code-bot[bot].
+fatal: ... 403
+```
+
+The token in this session is a GitHub App installation whose only repository is
+`Adedoyinjr/www` (`GET /installation/repositories` returns exactly one entry).
+Every write API on `Adedoyinjr/demo` and `wraith-protocol/demo` returns
+`403 Resource not accessible by integration`. The fork is therefore unchanged:
+`develop` = `ce8c961`, `kilo/autumn-tower-oc3` = `edf94da`.
+
+### What is needed to authorise
+
+| Scope | Why |
+| --- | --- |
+| Write (push) access to `Adedoyinjr/demo` for the account that owns PRs 224/238 | both PR heads live in that fork; the PRs cannot be updated from `wraith-protocol/demo` alone |
+| Write access to the two pull requests (author or maintainer) | only needed for step 238-2, the head retarget |
+
+Install the app on `Adedoyinjr/demo` (or grant the token push rights on it),
+then run the steps below as an account with write access to that fork.
+
+### Manual steps — PR 224 (fast-forward, no force, no rewrite)
+
+`dff569a` is a descendant of the current head `ce8c961`, so this is a
+fast-forward: nothing is rewritten and no existing commit is dropped.
+
+```bash
+git clone https://github.com/Adedoyinjr/demo.git demo
+cd demo
+git remote add fixes https://github.com/Adedoyinjr/www.git
+git fetch fixes kilo/wraith-demo-pr224-fix
+# sanity check: must print the current head
+git rev-parse origin/develop
+git rev-parse dff569a
+# fast-forward, no --force, no --force-with-lease
+git push origin dff569a:develop
+```
+
+### Manual steps — PR 238 (new branch, existing branch left intact)
+
+`559d8da` is not a descendant of `edf94da` (the `wip` commits were replaced by
+one conventional commit), so the existing head branch is **not** overwritten.
+Push the cleaned commit to a new branch and repoint the PR at it:
+
+```bash
+git fetch fixes kilo/wraith-demo-pr238-cleanup
+git push origin 559d8da:kilo/autumn-tower-oc3-clean
+```
+
+Then repoint the pull request (author or maintainer, write access to the PR):
+
+```bash
+gh api -X PATCH repos/wraith-protocol/demo/pulls/238 \
+  -f head=kilo/autumn-tower-oc3-clean
+```
+
+`kilo/autumn-tower-oc3` keeps `edf94da` and the whole old history, so the
+review threads and the previous work stay reachable. After the retarget, close
+the superseded state in the PR body rather than deleting the branch.
+
+Offline alternative (no access to the fork needed for the transfer itself):
+`demo-pr-fixes.bundle` in this folder carries all three fix branches with their
+full history.
+
+```bash
+git clone demo-pr-fixes.bundle demo-fixes
+cd demo-fixes
+git fetch origin 'refs/remotes/delivery/*:refs/heads/*'
+```
+
+### Choice for PR 238
+
+- `kilo/wraith-demo-pr238-cleanup` = `559d8da` — 6 files vs develop; keeps the
+  scanner-test timeout so the branch is green on its own.
+- `kilo/wraith-demo-pr238-cleanup-minimal` = `11f55bd` — 5 files vs develop;
+  drops the inherited #224 test change exactly as the reviewer asked. Its
+  `pnpm test:unit` shows 1 failure, the pre-existing
+  `stellar-scanner.worker.test.ts` 5 s timeout that also fails on
+  `wraith-protocol/demo:develop` itself and is fixed by the PR 224 branch.
+
 ## How to land them
 
 Fetch the fixed branches from the writable fork and push them to the demo fork:
