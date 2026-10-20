@@ -341,57 +341,63 @@ describe('stellar-scanner worker message contract', () => {
     expect(requestedStartLedgers).toEqual([250]);
   });
 
-  it('paginates past the 1,000-event page cap and reports progress for every page', async () => {
-    await import('./stellar-scanner.worker');
-    const requests: Record<string, any>[] = [];
-    const generated = generateStealthAddress(recipient.spendingPubKey, recipient.viewingPubKey);
-    const filler = validEvent();
+  // Decoding and scanning a full 1,000-event page is CPU-bound, so this case
+  // needs more than Vitest's 5s default once the whole suite runs in parallel.
+  it(
+    'paginates past the 1,000-event page cap and reports progress for every page',
+    { timeout: 30_000 },
+    async () => {
+      await import('./stellar-scanner.worker');
+      const requests: Record<string, any>[] = [];
+      const generated = generateStealthAddress(recipient.spendingPubKey, recipient.viewingPubKey);
+      const filler = validEvent();
 
-    mockPagedGetEvents({
-      latestLedger: 5_000,
-      requests,
-      pages: [
-        Array.from({ length: 1_000 }, () => ({ ...filler, ledger: 100 })),
-        [
-          {
-            ...buildEventEntry({
-              schemeId: 1,
-              stealthAddress: generated.stealthAddress,
-              caller,
-              ephemeralPubKey: generated.ephemeralPubKey,
-              viewTag: generated.viewTag,
-            }),
-            ledger: 120,
-          },
+      mockPagedGetEvents({
+        latestLedger: 5_000,
+        requests,
+        pages: [
+          Array.from({ length: 1_000 }, () => ({ ...filler, ledger: 100 })),
+          [
+            {
+              ...buildEventEntry({
+                schemeId: 1,
+                stealthAddress: generated.stealthAddress,
+                caller,
+                ephemeralPubKey: generated.ephemeralPubKey,
+                viewTag: generated.viewTag,
+              }),
+              ledger: 120,
+            },
+          ],
         ],
-      ],
-    });
+      });
 
-    const { messages, terminal } = await runScan({
-      rpcUrl: RPC_URL,
-      announcerContract: CONTRACT_ID,
-      viewingKey: recipient.viewingKey,
-      spendingPubKey: recipient.spendingPubKey,
-      spendingScalar: recipient.spendingScalar,
-      strategy: 'balanced',
-    });
+      const { messages, terminal } = await runScan({
+        rpcUrl: RPC_URL,
+        announcerContract: CONTRACT_ID,
+        viewingKey: recipient.viewingKey,
+        spendingPubKey: recipient.spendingPubKey,
+        spendingScalar: recipient.spendingScalar,
+        strategy: 'balanced',
+      });
 
-    const pages = messages.filter((message) => message.type === 'PAGE');
-    expect(pages).toHaveLength(2);
-    // All 1,000 events share ledger 100 and the page still has a cursor, so the
-    // ledger could continue on the next page and may not be committed yet.
-    expect(pages[0]).toMatchObject({ page: 1, events: 1_000, committedLedger: 99 });
-    // The second page is only reachable by following the RPC cursor.
-    const dataRequests = requests.filter(
-      (request) => request.method === 'getEvents' && request.params?.pagination?.limit !== 1,
-    );
-    expect(dataRequests[0].params.startLedger).toBe(1);
-    expect(dataRequests[1].params.pagination.cursor).toBe('cursor-1');
+      const pages = messages.filter((message) => message.type === 'PAGE');
+      expect(pages).toHaveLength(2);
+      // All 1,000 events share ledger 100 and the page still has a cursor, so the
+      // ledger could continue on the next page and may not be committed yet.
+      expect(pages[0]).toMatchObject({ page: 1, events: 1_000, committedLedger: 99 });
+      // The second page is only reachable by following the RPC cursor.
+      const dataRequests = requests.filter(
+        (request) => request.method === 'getEvents' && request.params?.pagination?.limit !== 1,
+      );
+      expect(dataRequests[0].params.startLedger).toBe(1);
+      expect(dataRequests[1].params.pagination.cursor).toBe('cursor-1');
 
-    expect(terminal.type).toBe('SUCCESS');
-    expect(terminal.results).toHaveLength(1);
-    expect((terminal.results as any)[0].stealthAddress).toBe(generated.stealthAddress);
-  });
+      expect(terminal.type).toBe('SUCCESS');
+      expect(terminal.results).toHaveLength(1);
+      expect((terminal.results as any)[0].stealthAddress).toBe(generated.stealthAddress);
+    },
+  );
 
   it('keeps the committed cursor when a later page fails so the rescan resumes there', async () => {
     await import('./stellar-scanner.worker');
