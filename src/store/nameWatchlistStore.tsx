@@ -1,142 +1,621 @@
 import { create } from 'zustand';
-import { persist, type PersistStorage } from 'zustand/middleware';
+
+import type { AuctionBid } from '@/lib/auctionEncryption';
+import {
+  AUCTION_STORAGE_KEY,
+  AUCTION_VAULT_VERSION,
+  DEFAULT_PBKDF2_ITERATIONS,
+  createBackup,
+  decryptBids,
+  deriveKey,
+  encryptBids,
+  isValidVault,
+  parseBackup,
+  type EncryptedBidVault,
+} from '@/lib/auctionEncryption';
 import {
   MAX_COLLECTION_ITEMS,
+  MAX_STORAGE_BYTES,
   isBoundedString,
   isFiniteTimestamp,
-  readVersionedValue,
-  writeVersioned,
 } from '../lib/versionedStorage';
+
+/**
+ * Staging/active storage key for the encrypted bid recovery vault while legacy
+ * plaintext has not yet been explicitly cleared. While legacy plaintext is
+ * present, the canonical key (`wraith-name-auction-watchlist`) holds the
+ * legacy v0 payload untouched and the active record (watched auctions +
+ * encrypted bids) is staged under this vault key. Once the user explicitly
+ * clears the legacy plaintext, the active record is written to the canonical
+ * key and this vault key is removed.
+ */
+export const VAULT_STORAGE_KEY = `${AUCTION_STORAGE_KEY}.vault`;
+
+export type { AuctionBid };
 
 export interface WatchedNameAuction {
   name: string;
   endsAt: number;
 }
 
-export interface LocalAuctionBid {
-  name: string;
-  amountStroops: string;
-  depositStroops: string;
-  saltHex: string;
-  revealed: boolean;
+export type AuctionStatus = 'empty' | 'legacy' | 'locked' | 'unlocked' | 'error';
+
+interface ActiveRecord {
+  watchedAuctions: WatchedNameAuction[];
+  encryptedBids: EncryptedBidVault | null;
 }
 
 interface NameWatchlistState {
   watchedAuctions: WatchedNameAuction[];
-  bids: Record<string, LocalAuctionBid>;
+  bids: Record<string, AuctionBid>;
+  status: AuctionStatus;
+  error: string | null;
+  hasLegacyPlaintext: boolean;
+  hasEncryptedVault: boolean;
+  inspectStorage: () => void;
+  setPassphrase: (passphrase: string, iterations?: number) => Promise<void>;
+  unlock: (passphrase: string) => Promise<void>;
+  lock: () => void;
   watchAuction: (auction: WatchedNameAuction) => void;
   unwatchAuction: (name: string) => void;
-  saveBid: (bid: LocalAuctionBid) => void;
-  markBidRevealed: (name: string) => void;
-  removeBid: (name: string) => void;
+  saveBid: (bid: AuctionBid) => Promise<void>;
+  markBidRevealed: (name: string) => Promise<void>;
+  removeBid: (name: string) => Promise<void>;
+  exportBackup: () => Promise<string>;
+  importBackup: (
+    backup: string,
+    passphrase: string,
+    options?: { replace?: boolean },
+  ) => Promise<void>;
+  clearLegacy: () => Promise<boolean>;
+  getBids: () => Record<string, AuctionBid>;
+  getStatus: () => AuctionStatus;
 }
-
-type PersistedWatchlist = Pick<NameWatchlistState, 'watchedAuctions' | 'bids'>;
-
-function isPersistedWatchlist(value: unknown): value is PersistedWatchlist {
-  if (typeof value !== 'object' || value === null) return false;
-  const state = value as Record<string, unknown>;
-  if (
-    !Array.isArray(state.watchedAuctions) ||
-    typeof state.bids !== 'object' ||
-    state.bids === null
-  ) {
-    return false;
-  }
-  const watched = state.watchedAuctions as unknown[];
-  const bids = state.bids as Record<string, unknown>;
-  return (
-    watched.length <= MAX_COLLECTION_ITEMS &&
-    Object.keys(bids).length <= MAX_COLLECTION_ITEMS &&
-    watched.every((item) => {
-      if (typeof item !== 'object' || item === null) return false;
-      const auction = item as Record<string, unknown>;
-      return (
-        isBoundedString(auction.name, 128) &&
-        auction.name.length > 0 &&
-        isFiniteTimestamp(auction.endsAt)
-      );
-    }) &&
-    Object.values(bids).every((item) => {
-      if (typeof item !== 'object' || item === null) return false;
-      const bid = item as Record<string, unknown>;
-      return (
-        isBoundedString(bid.name, 128) &&
-        isBoundedString(bid.amountStroops, 80) &&
-        isBoundedString(bid.depositStroops, 80) &&
-        isBoundedString(bid.saltHex, 256) &&
-        typeof bid.revealed === 'boolean'
-      );
-    })
-  );
-}
-
-const watchlistStorage: PersistStorage<NameWatchlistState> = {
-  getItem: (name) => {
-    const state = readVersionedValue<PersistedWatchlist>(
-      localStorage,
-      name,
-      isPersistedWatchlist,
-      (value) => {
-        const legacy = value as { state?: unknown };
-        return legacy.state;
-      },
-    );
-    return state ? { state: state as NameWatchlistState, version: 1 } : null;
-  },
-  setItem: (name, value) =>
-    writeVersioned(localStorage, name, {
-      watchedAuctions: value.state.watchedAuctions,
-      bids: value.state.bids,
-    }),
-  removeItem: (name) => localStorage.removeItem(name),
-};
 
 const normalizeName = (name: string) => name.trim().toLowerCase();
 
-export const useNameWatchlistStore = create<NameWatchlistState>()(
-  persist(
-    (set) => ({
+/**
+ * Watched-auction entries are user-writable, so they are validated and bounded
+ * before they reach the store: unbounded strings or a huge collection would
+ * otherwise be persisted and re-read on every load.
+ */
+function isWatchedAuction(value: unknown): value is WatchedNameAuction {
+  if (typeof value !== 'object' || value === null) return false;
+  const auction = value as Record<string, unknown>;
+  return (
+    isBoundedString(auction.name, 128) &&
+    auction.name.length > 0 &&
+    isFiniteTimestamp(auction.endsAt)
+  );
+}
+
+function sanitizeWatchedAuctions(value: unknown): WatchedNameAuction[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isWatchedAuction).slice(0, MAX_COLLECTION_ITEMS);
+}
+
+/**
+ * In-memory derived encryption key, held only while the vault is unlocked.
+ * Cleared on lock, page reload, or logout. Never persisted to localStorage.
+ */
+let activeKey: CryptoKey | null = null;
+let activeKdfMeta: { salt: string; iterations: number } | null = null;
+
+function clearActiveKey() {
+  activeKey = null;
+  activeKdfMeta = null;
+}
+
+function readRaw<T = unknown>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return null;
+    if (raw.length > MAX_STORAGE_BYTES) {
+      // Oversized payloads are discarded rather than trusted.
+      localStorage.removeItem(key);
+      return null;
+    }
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeRaw(key: string, value: unknown): void {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function removeRaw(key: string): void {
+  localStorage.removeItem(key);
+}
+
+/**
+ * Legacy plaintext formats written before the bids were encrypted:
+ * - zustand-persist: { version: 0, state: { watchedAuctions, bids } }
+ * - versioned value: { version: 1, data: { watchedAuctions, bids } }
+ *
+ * Both hold the recovery secrets in plaintext, so they are only ever read to
+ * migrate them into an encrypted vault and are never written back.
+ */
+function readLegacy(): {
+  bids: Record<string, AuctionBid>;
+  watchedAuctions: WatchedNameAuction[];
+} | null {
+  const raw = readRaw<{
+    version: number;
+    state?: { watchedAuctions?: unknown; bids?: unknown };
+    data?: { watchedAuctions?: unknown; bids?: unknown };
+  }>(AUCTION_STORAGE_KEY);
+  if (!raw) return null;
+
+  const payload = raw.version === 0 ? raw.state : raw.version === 1 ? raw.data : undefined;
+  if (!payload) return null;
+
+  const watchedAuctions = sanitizeWatchedAuctions(payload.watchedAuctions);
+  const bids = payload.bids;
+  if (!bids || typeof bids !== 'object' || Array.isArray(bids)) {
+    return { bids: {}, watchedAuctions };
+  }
+  return { bids: bids as Record<string, AuctionBid>, watchedAuctions };
+}
+
+/** New v1 format: { version: 1, watchedAuctions, encryptedBids: EncryptedBidVault | null } */
+function readCanonicalV1(): ActiveRecord | null {
+  const raw = readRaw<{
+    version: number;
+    watchedAuctions?: unknown;
+    encryptedBids?: unknown;
+  }>(AUCTION_STORAGE_KEY);
+  if (!raw || raw.version !== AUCTION_VAULT_VERSION) return null;
+  // The encrypted canonical record always carries the vault slot. A v1 payload
+  // without it is the legacy versioned plaintext shape, not an encrypted vault.
+  if (!('encryptedBids' in raw)) return null;
+  const watchedAuctions = sanitizeWatchedAuctions(raw.watchedAuctions);
+  const encryptedBids = isValidVault(raw.encryptedBids) ? raw.encryptedBids : null;
+  return { watchedAuctions, encryptedBids };
+}
+
+/** Active record staged under the vault key (pre-clear migration). */
+function readVaultKeyRecord(): ActiveRecord | null {
+  const raw = readRaw<unknown>(VAULT_STORAGE_KEY);
+  if (!raw) return null;
+  let vault: EncryptedBidVault | null = null;
+  let watchedAuctions: unknown = null;
+  try {
+    const parsed = parseBackup(raw);
+    vault = parsed.vault;
+  } catch {
+    if (isValidVault(raw)) {
+      vault = raw as EncryptedBidVault;
+    } else if (raw && typeof raw === 'object' && 'encryptedBids' in raw) {
+      const rec = raw as { watchedAuctions?: unknown; encryptedBids?: unknown };
+      vault = isValidVault(rec.encryptedBids) ? rec.encryptedBids : null;
+      watchedAuctions = rec.watchedAuctions;
+    }
+  }
+  if (!vault) return null;
+  return {
+    watchedAuctions: sanitizeWatchedAuctions(watchedAuctions),
+    encryptedBids: vault,
+  };
+}
+
+/** The currently active record: vault key (pre-clear) else canonical v1 else legacy. */
+function readActive(): (ActiveRecord & { isLegacy: boolean }) | null {
+  const vault = readVaultKeyRecord();
+  if (vault) return { ...vault, isLegacy: false };
+  const canonical = readCanonicalV1();
+  if (canonical) return { ...canonical, isLegacy: false };
+  const legacy = readLegacy();
+  if (legacy)
+    return { watchedAuctions: legacy.watchedAuctions, encryptedBids: null, isLegacy: true };
+  return null;
+}
+
+function activeEncryptedVault(): EncryptedBidVault | null {
+  const active = readActive();
+  return active?.encryptedBids ?? null;
+}
+
+function writeActive(record: ActiveRecord): void {
+  // While legacy plaintext exists, stage under the vault key and leave the
+  // canonical legacy untouched until explicitly cleared.
+  if (readLegacy()) {
+    writeRaw(VAULT_STORAGE_KEY, record);
+  } else {
+    writeRaw(AUCTION_STORAGE_KEY, { version: AUCTION_VAULT_VERSION, ...record });
+  }
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  if (typeof btoa === 'function') {
+    return btoa(binary);
+  }
+  return Buffer.from(binary, 'binary').toString('base64');
+}
+
+function fromBase64(input: string): Uint8Array {
+  if (typeof atob === 'function') {
+    const binary = atob(input);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+  return Buffer.from(input, 'base64') as unknown as Uint8Array;
+}
+
+/** Re-encrypt bids using the in-memory derived key with a fresh IV every time. */
+async function sealBids(bids: Record<string, AuctionBid>): Promise<EncryptedBidVault> {
+  if (!activeKey || !activeKdfMeta) {
+    throw new Error('Vault is not unlocked. Set a passphrase before saving bids.');
+  }
+  const subtle = globalThis.crypto.subtle;
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await subtle.encrypt(
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
+    activeKey,
+    new TextEncoder().encode(JSON.stringify(bids)),
+  );
+  return {
+    version: AUCTION_VAULT_VERSION,
+    kdf: {
+      algorithm: 'PBKDF2',
+      hash: 'SHA-256',
+      iterations: activeKdfMeta.iterations,
+      salt: activeKdfMeta.salt,
+    },
+    cipher: { algorithm: 'AES-GCM', iv: toBase64(iv), keyLength: 256 },
+    data: toBase64(new Uint8Array(ciphertext)),
+  };
+}
+
+async function persistEncrypted(
+  watchedAuctions: WatchedNameAuction[],
+  bids: Record<string, AuctionBid>,
+): Promise<void> {
+  const vault = await sealBids(bids);
+  writeActive({ watchedAuctions, encryptedBids: vault });
+}
+
+/** Decrypt a stored vault using the in-memory derived key (vault must be unlocked). */
+async function decryptVaultWithActiveKey(
+  vault: EncryptedBidVault,
+): Promise<Record<string, AuctionBid>> {
+  if (!activeKey) {
+    throw new Error('Vault is not unlocked.');
+  }
+  const subtle = globalThis.crypto.subtle;
+  const iv = fromBase64(vault.cipher.iv);
+  const ciphertext = new Uint8Array(fromBase64(vault.data));
+  const decrypted = await subtle.decrypt(
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource },
+    activeKey,
+    ciphertext,
+  );
+  const plaintext = new TextDecoder().decode(decrypted);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(plaintext);
+  } catch {
+    throw new Error('Persisted recovery record is not valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Persisted recovery record is not a bids record.');
+  }
+  return parsed as Record<string, AuctionBid>;
+}
+
+/** Read back the persisted vault and verify every expected bid is durably stored. */
+async function verifyStoredBids(expected: Record<string, AuctionBid>): Promise<void> {
+  if (!activeKey) {
+    throw new Error('Vault is not unlocked; cannot verify persisted recovery record.');
+  }
+  const active = readActive();
+  const vault = active?.encryptedBids ?? null;
+  if (!vault) {
+    throw new Error('No encrypted vault found after persisting bid.');
+  }
+  const decrypted = await decryptVaultWithActiveKey(vault);
+  for (const [name, bid] of Object.entries(expected)) {
+    const stored = decrypted[name];
+    if (!stored || JSON.stringify(stored) !== JSON.stringify(bid)) {
+      throw new Error(`Persisted recovery record verification failed for ${name}.`);
+    }
+  }
+}
+
+export const useNameWatchlistStore = create<NameWatchlistState>((set, get) => ({
+  watchedAuctions: [],
+  bids: {},
+  status: 'empty',
+  error: null,
+  hasLegacyPlaintext: false,
+  hasEncryptedVault: false,
+
+  inspectStorage() {
+    const active = readActive();
+    const hasLegacy = Boolean(active?.isLegacy);
+    const hasEncrypted = Boolean(active?.encryptedBids);
+    set({
+      hasLegacyPlaintext: hasLegacy,
+      hasEncryptedVault: hasEncrypted,
+      watchedAuctions: active?.watchedAuctions ?? [],
+      bids: {},
+      status: hasLegacy ? 'legacy' : hasEncrypted ? 'locked' : 'empty',
+      error: null,
+    });
+  },
+
+  async setPassphrase(passphrase: string, iterations: number = DEFAULT_PBKDF2_ITERATIONS) {
+    if (!passphrase || passphrase.length < 8) {
+      throw new Error('Passphrase must be at least 8 characters.');
+    }
+    set({ error: null });
+    clearActiveKey();
+    try {
+      const legacy = readLegacy();
+      const existingVault = activeEncryptedVault();
+
+      if (existingVault && !legacy) {
+        throw new Error('An encrypted vault already exists. Use Unlock instead.');
+      }
+
+      let bidsToEncrypt: Record<string, AuctionBid>;
+      let watchedAuctions = get().watchedAuctions;
+
+      if (legacy) {
+        // Migration: encrypt the legacy plaintext bids.
+        bidsToEncrypt = legacy.bids;
+        watchedAuctions = legacy.watchedAuctions;
+      } else {
+        bidsToEncrypt = {};
+      }
+
+      const vault = await encryptBids(passphrase, bidsToEncrypt, iterations);
+      // Verify the replacement can be decrypted back before trusting it.
+      const verified = await decryptBids(passphrase, vault);
+      if (JSON.stringify(verified) !== JSON.stringify(bidsToEncrypt)) {
+        throw new Error('Encrypted replacement failed verification.');
+      }
+
+      const salt = fromBase64(vault.kdf.salt);
+      activeKey = await deriveKey(passphrase, salt, vault.kdf.iterations);
+      activeKdfMeta = { salt: vault.kdf.salt, iterations: vault.kdf.iterations };
+
+      writeActive({ watchedAuctions, encryptedBids: vault });
+
+      set({
+        bids: bidsToEncrypt,
+        watchedAuctions,
+        status: 'unlocked',
+        error: null,
+        hasLegacyPlaintext: Boolean(legacy),
+        hasEncryptedVault: true,
+      });
+    } catch (err) {
+      clearActiveKey();
+      const message = err instanceof Error ? err.message : 'Failed to set up encryption.';
+      set({ status: 'error', error: message });
+      throw err;
+    }
+  },
+
+  async unlock(passphrase) {
+    set({ error: null });
+    clearActiveKey();
+    try {
+      const vault = activeEncryptedVault();
+      if (!vault) {
+        throw new Error('No encrypted vault to unlock.');
+      }
+      const decrypted = await decryptBids(passphrase, vault);
+      const salt = fromBase64(vault.kdf.salt);
+      activeKey = await deriveKey(passphrase, salt, vault.kdf.iterations);
+      activeKdfMeta = { salt: vault.kdf.salt, iterations: vault.kdf.iterations };
+      set({
+        bids: decrypted,
+        watchedAuctions: readActive()?.watchedAuctions ?? [],
+        status: 'unlocked',
+        error: null,
+        hasEncryptedVault: true,
+      });
+    } catch (err) {
+      clearActiveKey();
+      const message = err instanceof Error ? err.message : 'Unable to unlock vault.';
+      set({ status: 'error', error: message });
+      throw err;
+    }
+  },
+
+  lock() {
+    clearActiveKey();
+    set({ bids: {}, status: 'locked', error: null });
+  },
+
+  watchAuction(auction) {
+    const name = normalizeName(auction.name);
+    const watched = [
+      ...get().watchedAuctions.filter((item) => item.name !== name),
+      { ...auction, name },
+    ];
+    const active = readActive();
+    writeActive({ watchedAuctions: watched, encryptedBids: active?.encryptedBids ?? null });
+    set({ watchedAuctions: watched });
+  },
+
+  unwatchAuction(name) {
+    const watched = get().watchedAuctions.filter((item) => item.name !== normalizeName(name));
+    const active = readActive();
+    writeActive({ watchedAuctions: watched, encryptedBids: active?.encryptedBids ?? null });
+    set({ watchedAuctions: watched });
+  },
+
+  async saveBid(bid) {
+    if (get().status !== 'unlocked') {
+      throw new Error('Vault is locked. Unlock with your passphrase before saving a bid.');
+    }
+    const name = normalizeName(bid.name);
+    const bids = { ...get().bids, [name]: { ...bid, name } };
+    const watched = [...get().watchedAuctions];
+    if (!watched.some((item) => item.name === name)) {
+      watched.push({ name, endsAt: 0 });
+    }
+    await persistEncrypted(watched, bids);
+    // Read back and verify the recovery record is durably stored and decryptable
+    // before it is trusted for on-chain submission.
+    await verifyStoredBids(bids);
+    set({ bids, watchedAuctions: watched });
+  },
+
+  async markBidRevealed(name) {
+    if (get().status !== 'unlocked') {
+      throw new Error('Vault is locked. Unlock with your passphrase before revealing a bid.');
+    }
+    const key = normalizeName(name);
+    const bid = get().bids[key];
+    if (!bid) return;
+    const bids = { ...get().bids, [key]: { ...bid, revealed: true } };
+    await persistEncrypted(get().watchedAuctions, bids);
+    set({ bids });
+  },
+
+  async removeBid(name) {
+    if (get().status !== 'unlocked') {
+      throw new Error('Vault is locked. Unlock with your passphrase before removing a bid.');
+    }
+    const key = normalizeName(name);
+    const bids = { ...get().bids };
+    delete bids[key];
+    await persistEncrypted(get().watchedAuctions, bids);
+    set({ bids });
+  },
+
+  async exportBackup() {
+    const vault = activeEncryptedVault();
+    if (!vault) {
+      throw new Error('No encrypted vault to back up.');
+    }
+    return JSON.stringify(createBackup(vault));
+  },
+
+  async importBackup(backup, passphrase, { replace = false } = {}) {
+    if (!passphrase || passphrase.length < 8) {
+      throw new Error('Passphrase must be at least 8 characters.');
+    }
+    set({ error: null });
+
+    // Refuse to replace a non-empty current vault without explicit confirmation.
+    // This check runs before any decryption or key derivation so the current
+    // vault and its in-memory key are preserved on refusal.
+    const currentVault = activeEncryptedVault();
+    if (currentVault && !replace) {
+      const message =
+        'Current vault already contains bid recovery secrets. Export your current vault first, or confirm replacement.';
+      set({ status: 'error', error: message });
+      throw new Error(message);
+    }
+
+    clearActiveKey();
+    try {
+      const input: unknown = typeof backup === 'string' ? JSON.parse(backup) : backup;
+      const parsed = parseBackup(input);
+      // Decrypt the imported backup to validate the passphrase and ciphertext and
+      // inspect the recovered bids. This does not touch the current vault.
+      const decrypted = await decryptBids(passphrase, parsed.vault);
+      const salt = fromBase64(parsed.vault.kdf.salt);
+      activeKey = await deriveKey(passphrase, salt, parsed.vault.kdf.iterations);
+      activeKdfMeta = { salt: parsed.vault.kdf.salt, iterations: parsed.vault.kdf.iterations };
+      // Only now, after successful validation, overwrite the active record.
+      writeActive({ watchedAuctions: [], encryptedBids: parsed.vault });
+      set({
+        bids: decrypted,
+        watchedAuctions: [],
+        status: 'unlocked',
+        error: null,
+        hasEncryptedVault: true,
+        hasLegacyPlaintext: Boolean(readLegacy()),
+      });
+    } catch (err) {
+      clearActiveKey();
+      const message = err instanceof Error ? err.message : 'Failed to import backup.';
+      set({ status: 'error', error: message });
+      throw err;
+    }
+  },
+
+  async clearLegacy() {
+    const legacy = readLegacy();
+    if (!legacy) {
+      // Nothing legacy to clear. Safe no-op for repeated attempts.
+      return false;
+    }
+    const vault = activeEncryptedVault();
+    if (!vault) {
+      throw new Error(
+        'Cannot clear legacy plaintext: no verified encrypted replacement exists. Back up and migrate first.',
+      );
+    }
+    const active = readActive();
+    // Replace the canonical legacy plaintext with the verified encrypted vault.
+    writeRaw(AUCTION_STORAGE_KEY, {
+      version: AUCTION_VAULT_VERSION,
+      watchedAuctions: active?.watchedAuctions ?? legacy.watchedAuctions,
+      encryptedBids: vault,
+    });
+    removeRaw(VAULT_STORAGE_KEY);
+    set({ hasLegacyPlaintext: false, hasEncryptedVault: true });
+    return true;
+  },
+
+  getBids() {
+    return get().bids;
+  },
+
+  getStatus() {
+    return get().status;
+  },
+}));
+
+/**
+ * Keeps this tab in sync with other tabs that write the watchlist or the
+ * encrypted vault. Encrypted bids are only re-read while this tab holds the
+ * derived key; otherwise the vault stays locked and only the watchlist
+ * metadata is refreshed.
+ */
+async function applyStorageChange() {
+  const active = readActive();
+  if (!active) {
+    useNameWatchlistStore.setState({
       watchedAuctions: [],
       bids: {},
-      watchAuction: (auction: WatchedNameAuction) =>
-        set((state: NameWatchlistState) => {
-          const name = normalizeName(auction.name);
-          return {
-            watchedAuctions: [
-              ...state.watchedAuctions.filter((item) => item.name !== name),
-              { ...auction, name },
-            ],
-          };
-        }),
-      unwatchAuction: (name: string) =>
-        set((state: NameWatchlistState) => ({
-          watchedAuctions: state.watchedAuctions.filter(
-            (item) => item.name !== normalizeName(name),
-          ),
-        })),
-      saveBid: (bid: LocalAuctionBid) =>
-        set((state: NameWatchlistState) => {
-          const name = normalizeName(bid.name);
-          return { bids: { ...state.bids, [name]: { ...bid, name } } };
-        }),
-      markBidRevealed: (name: string) =>
-        set((state: NameWatchlistState) => {
-          const key = normalizeName(name);
-          const bid = state.bids[key];
-          if (!bid) return state;
-          return { bids: { ...state.bids, [key]: { ...bid, revealed: true } } };
-        }),
-      removeBid: (name: string) =>
-        set((state: NameWatchlistState) => {
-          const bids = { ...state.bids };
-          delete bids[normalizeName(name)];
-          return { bids };
-        }),
-    }),
-    { name: 'wraith-name-auction-watchlist', storage: watchlistStorage, version: 1 },
-  ),
-);
+      status: 'empty',
+      hasLegacyPlaintext: false,
+      hasEncryptedVault: false,
+    });
+    return;
+  }
+
+  const state = useNameWatchlistStore.getState();
+  if (state.status !== 'unlocked' || !active.encryptedBids) {
+    useNameWatchlistStore.setState({
+      watchedAuctions: active.watchedAuctions,
+      status: active.isLegacy ? 'legacy' : active.encryptedBids ? 'locked' : 'empty',
+      hasLegacyPlaintext: active.isLegacy,
+      hasEncryptedVault: Boolean(active.encryptedBids),
+    });
+    return;
+  }
+
+  try {
+    const bids = await decryptVaultWithActiveKey(active.encryptedBids);
+    useNameWatchlistStore.setState({ bids, watchedAuctions: active.watchedAuctions });
+  } catch {
+    // The vault was re-keyed or replaced in another tab: this tab locks again.
+    useNameWatchlistStore.setState({ bids: {}, status: 'locked' });
+  }
+}
 
 let storageListener: ((e: StorageEvent) => void) | null = null;
 
@@ -145,15 +624,8 @@ export function initNameWatchlistSync() {
   if (typeof window.addEventListener !== 'function') return;
 
   storageListener = (e: StorageEvent) => {
-    if (e.key === 'wraith-name-auction-watchlist') {
-      if (e.newValue) {
-        useNameWatchlistStore.persist.rehydrate();
-      } else {
-        useNameWatchlistStore.setState({ watchedAuctions: [], bids: {} });
-      }
-    } else if (e.key === null) {
-      useNameWatchlistStore.setState({ watchedAuctions: [], bids: {} });
-    }
+    if (e.key !== null && e.key !== AUCTION_STORAGE_KEY && e.key !== VAULT_STORAGE_KEY) return;
+    void applyStorageChange();
   };
 
   window.addEventListener('storage', storageListener);
