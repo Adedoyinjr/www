@@ -6,6 +6,7 @@ import { useStealthKeys } from '@/context/StealthKeysContext';
 import { useContacts } from '@/store/contactsStore';
 import { useNameHistory } from '@/store/nameHistoryStore';
 import { useNameWatchlistStore, type AuctionBid } from '@/store/nameWatchlistStore';
+import { placeBid as placeBidTransaction } from '@/lib/auctionBidLifecycle';
 import { stellarTxUrl } from '@/lib/explorer';
 import { tryGetStellarContractId } from '@/lib/stellar/deployments';
 import {
@@ -19,7 +20,7 @@ import {
   getActiveNameAuctions,
   getNameAuction,
   getNameAuctionConfig,
-  submitTransaction,
+  submitSignedTransaction,
   type NameAuction,
   type NameAuctionConfig,
 } from '@/lib/stellar/names';
@@ -87,7 +88,9 @@ export default function NamesAuctions() {
   const [isLoading, setIsLoading] = useState(true);
   const [pendingAction, setPendingAction] = useState('');
   const [error, setError] = useState('');
-  const [txHash, setTxHash] = useState('');
+  const [txState, setTxState] = useState<{ hash: string; status: 'pending' | 'committed' } | null>(
+    null,
+  );
   const [lookupName, setLookupName] = useState('');
   const [selectedAuction, setSelectedAuction] = useState<NameAuction | null>(null);
   const [bidAmount, setBidAmount] = useState('');
@@ -164,12 +167,12 @@ export default function NamesAuctions() {
   const submitAuctionTransaction = async (action: string, buildXdr: () => Promise<string>) => {
     setPendingAction(action);
     setError('');
-    setTxHash('');
+    setTxState(null);
     try {
       const xdr = await buildXdr();
       const signedXdr = await signTransaction(xdr);
-      const hash = await submitTransaction(signedXdr);
-      setTxHash(hash);
+      const result = await submitSignedTransaction(signedXdr);
+      setTxState({ hash: result.hash, status: result.status });
       await refreshAuctions();
       return true;
     } catch (transactionError) {
@@ -202,42 +205,64 @@ export default function NamesAuctions() {
       return;
     }
     if (!address || !selectedAuction || parsedBid === null || bidError) return;
-    const action = `bid:${selectedAuction.name}`;
+    const name = selectedAuction.name;
+    const action = `bid:${name}`;
     setPendingAction(action);
     setError('');
+    setTxState(null);
     try {
+      const existingBid = bids[name];
+      if (existingBid && !existingBid.revealed) {
+        throw new Error(
+          'A bid for this name is already recorded and may already be committed. Reveal or refund it before bidding again.',
+        );
+      }
       const salt = globalThis.crypto.getRandomValues(new Uint8Array(32));
       const saltHex = Array.from(salt, (byte) => byte.toString(16).padStart(2, '0')).join('');
-      const commitmentHex = await computeNameBidCommitment(
-        address,
-        selectedAuction.name,
-        parsedBid,
-        saltHex,
-      );
-      // Persist and verify the recovery record BEFORE signing or broadcasting the
-      // on-chain commit. If storage or verification fails, stop here and show an
-      // error: no transaction is ever submitted without a durable recovery record.
-      await saveBid({
-        name: selectedAuction.name,
-        amountStroops: parsedBid.toString(),
-        depositStroops: parsedBid.toString(),
-        saltHex,
-        revealed: false,
+      const result = await placeBidTransaction({
+        build: async () => {
+          const commitmentHex = await computeNameBidCommitment(address, name, parsedBid, saltHex);
+          return buildCommitNameBidTransaction(address, {
+            name,
+            commitmentHex,
+            deposit: parsedBid,
+          });
+        },
+        sign: signTransaction,
+        broadcast: submitSignedTransaction,
+        persistRecovery: () =>
+          saveBid({
+            name,
+            amountStroops: parsedBid.toString(),
+            depositStroops: parsedBid.toString(),
+            saltHex,
+            revealed: false,
+          }),
+        discardRecovery: () => removeBid(name),
       });
-      const submitted = await submitAuctionTransaction(action, () =>
-        buildCommitNameBidTransaction(address, {
-          name: selectedAuction.name,
-          commitmentHex,
-          deposit: parsedBid,
-        }),
-      );
-      if (submitted) {
-        watchAuction({ name: selectedAuction.name, endsAt: selectedAuction.revealEnd });
+
+      if (result.status === 'committed' || result.status === 'pending') {
+        setTxState({ hash: result.hash ?? '', status: result.status });
+        watchAuction({ name, endsAt: selectedAuction.revealEnd });
         setSelectedAuction(null);
         setBidAmount('');
+        return;
       }
-      // If submission fails or its outcome is ambiguous, the persisted recovery
-      // record is retained so the bid can be retried or revealed after a reload.
+
+      if (result.status === 'retryable') {
+        setError(
+          result.recoveryRetained
+            ? `Your bid was not submitted: ${result.error ?? 'the transaction never reached the network'}. Nothing was committed, but the vault could not be updated, so the bid stays recorded.`
+            : `Your bid was not submitted: ${result.error ?? 'the transaction never reached the network'}. Nothing was committed, so you can try again.`,
+        );
+        return;
+      }
+
+      setError(
+        `The network did not confirm your bid: ${result.error ?? 'unknown error'}. It may or may not have been committed, so your recovery material is kept for a reveal. Check the explorer before bidding again.`,
+      );
+      setSelectedAuction(null);
+      setBidAmount('');
     } catch (commitmentError) {
       setError(
         commitmentError instanceof Error ? commitmentError.message : 'Failed to prepare bid',
@@ -597,11 +622,13 @@ export default function NamesAuctions() {
           {error}
         </p>
       )}
-      {txHash && (
+      {txState && (
         <p className="font-body text-sm text-tertiary">
-          Transaction submitted.{' '}
+          {txState.status === 'pending'
+            ? 'Transaction submitted and awaiting confirmation.'
+            : 'Transaction submitted.'}{' '}
           <a
-            href={stellarTxUrl(txHash)}
+            href={stellarTxUrl(txState.hash)}
             target="_blank"
             rel="noreferrer"
             className="font-mono underline"

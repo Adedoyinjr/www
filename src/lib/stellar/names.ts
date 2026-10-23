@@ -10,6 +10,7 @@ import {
 import { Buffer } from 'buffer';
 import { STELLAR_NETWORK } from '@/config';
 import { getStellarContractId } from './deployments';
+import { TransactionRejectedError, type SubmittedTransaction } from './transactionOutcome';
 
 /**
  * The Wraith Names contract for the selected network. Resolved per call so an
@@ -705,10 +706,7 @@ export async function getOwnedNames(ownerAddress: string): Promise<string[]> {
   }
 }
 
-/**
- * Submit a signed transaction to the network
- */
-export async function submitTransaction(signedXdr: string): Promise<string> {
+export async function submitSignedTransaction(signedXdr: string): Promise<SubmittedTransaction> {
   const { rpc } = await import('@stellar/stellar-sdk');
   const server = new rpc.Server(STELLAR_NETWORK.rpcUrl);
 
@@ -716,8 +714,16 @@ export async function submitTransaction(signedXdr: string): Promise<string> {
   const result = await server.sendTransaction(tx);
 
   if (result.status === 'ERROR') {
-    throw new Error(result.errorResult?.toString() || 'Transaction failed');
+    throw new TransactionRejectedError(result.errorResult?.toString() || 'Transaction failed');
   }
 
-  return result.hash;
+  return { hash: result.hash, status: result.status === 'PENDING' ? 'pending' : 'committed' };
+}
+
+/**
+ * Submit a signed transaction to the network
+ */
+export async function submitTransaction(signedXdr: string): Promise<string> {
+  const { hash } = await submitSignedTransaction(signedXdr);
+  return hash;
 }
